@@ -74,7 +74,12 @@ export function GalleryScroller({ className }: GalleryScrollerProps) {
         className
       )}
     >
-      <div className="gallery-mask no-scrollbar flex gap-4 overflow-x-auto px-4 pb-4 sm:gap-5 sm:px-6">
+      <div
+        role="region"
+        aria-label="Sample agent output cards"
+        tabIndex={0}
+        className="gallery-mask no-scrollbar flex gap-4 overflow-x-auto px-4 pb-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--text)] sm:gap-5 sm:px-6"
+      >
         {GALLERY_CARDS.map((card) => (
           <Card
             key={card.title}

@@ -20,7 +20,7 @@ export function ItineraryRow({
   return (
     <div
       className={cn(
-        "grid grid-cols-1 gap-1.5 py-4 sm:grid-cols-[88px_1fr_auto] sm:items-baseline sm:gap-4",
+        "grid grid-cols-[60px_1fr_auto] items-baseline gap-3 py-4 sm:grid-cols-[88px_1fr_auto] sm:gap-4",
         !isLast && "border-b border-border",
         className
       )}

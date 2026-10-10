@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { ParsedDay } from "@/lib/parse-itinerary";
 
 export interface DayTabsProps {
@@ -33,6 +33,12 @@ export function DayTabs({
           ) : null}
         </TabsList>
       </div>
+      {days.map((d) => (
+        <TabsContent key={d.id} value={d.id} className="sr-only" />
+      ))}
+      {hasSummary ? (
+        <TabsContent value="summary" className="sr-only" />
+      ) : null}
     </Tabs>
   );
 }

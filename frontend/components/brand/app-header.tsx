@@ -49,7 +49,10 @@ export function AppHeader({
         <Logo href="/" showIcon />
         <div className="flex items-center gap-3 sm:gap-4">
           {tripSummaryPill ? (
-            <Chip asSpan className="min-h-[38px] px-4 py-1.5 text-sm">
+            <Chip
+              asSpan
+              className="hidden min-h-[38px] px-4 py-1.5 text-sm sm:inline-flex"
+            >
               {tripSummaryPill}
             </Chip>
           ) : (

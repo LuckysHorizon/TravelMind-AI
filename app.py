@@ -1,12 +1,9 @@
-from pathlib import Path
 import traceback
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from backend import (
@@ -23,8 +20,6 @@ from backend import (
 import nest_asyncio
 
 nest_asyncio.apply()
-
-BASE_DIR = Path(__file__).resolve().parent
 
 app = FastAPI(
     title="TravelMind AI",
@@ -46,18 +41,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-STATIC_DIR = BASE_DIR / "static"
-TEMPLATES_DIR = BASE_DIR / "templates"
-
-if STATIC_DIR.is_dir():
-    app.mount(
-        "/static",
-        StaticFiles(directory=str(STATIC_DIR)),
-        name="static",
-    )
-
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR)) if TEMPLATES_DIR.is_dir() else None
-
 
 class TravelRequest(BaseModel):
     message: str = Field(max_length=1000)
@@ -72,21 +55,13 @@ class ApprovalRequest(BaseModel):
     sync: bool = False
 
 
-@app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
-    if templates is not None and (TEMPLATES_DIR / "index.html").is_file():
-        return templates.TemplateResponse(
-            request=request,
-            name="index.html",
-            context={},
-        )
-    return JSONResponse(
-        content={
-            "status": "ok",
-            "service": "TravelMind AI API",
-            "version": "2.0.0",
-        }
-    )
+@app.get("/")
+async def root():
+    return {
+        "status": "ok",
+        "service": "TravelMind AI API",
+        "version": "2.0.0",
+    }
 
 
 @app.post("/api/travel")

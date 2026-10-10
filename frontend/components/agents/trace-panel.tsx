@@ -59,7 +59,7 @@ export function TracePanel({
       )}
     >
       <div className="flex items-center justify-between gap-3">
-        <span className="text-xs font-medium uppercase tracking-[0.06em] text-[var(--muted)]">
+        <span className="text-xs font-medium uppercase tracking-[0.06em] text-[var(--trace-fg)]/80">
           Live trace
         </span>
         <div className="flex items-center gap-3">
@@ -70,7 +70,7 @@ export function TracePanel({
                 ? "text-[var(--live)]"
                 : status === "error"
                   ? "text-[var(--danger-fg)]"
-                  : "text-[var(--muted)]"
+                  : "text-[var(--trace-fg)]/80"
             )}
           >
             {statusText}
@@ -81,7 +81,7 @@ export function TracePanel({
               onClick={() => setCollapsed((prev) => !prev)}
               aria-expanded={!collapsed}
               aria-label={collapsed ? "Expand live trace" : "Collapse live trace"}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--r-pill)] text-[var(--muted)] hover:text-[var(--trace-fg)] sm:hidden"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--r-pill)] text-[var(--trace-fg)]/80 hover:text-[var(--trace-fg)] sm:hidden"
             >
               {collapsed ? (
                 <ChevronDown className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
@@ -96,10 +96,13 @@ export function TracePanel({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
+        role="log"
+        aria-label="Execution trace log"
         aria-live="polite"
         aria-atomic="false"
+        tabIndex={0}
         className={cn(
-          "mono mt-4 max-h-[260px] overflow-y-auto pr-1",
+          "mono mt-4 max-h-[260px] overflow-y-auto pr-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--trace-fg)]",
           collapsed && "hidden sm:block"
         )}
       >
@@ -123,7 +126,7 @@ export function TracePanel({
                 key={line.id}
                 className="flex flex-wrap items-center gap-x-2 py-0.5"
               >
-                <span className="text-[var(--muted)]">{line.time}</span>
+                <span className="text-[var(--trace-fg)]/75">{line.time}</span>
                 <span>{line.agent}</span>
                 <span>{line.tool}</span>
                 {line.status && <span>{line.status}</span>}

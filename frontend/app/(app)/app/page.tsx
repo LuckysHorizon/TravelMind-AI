@@ -16,13 +16,24 @@ import {
   type StoredThreadItem,
 } from "@/lib/threads";
 
+const emptySubscribe = () => () => {};
+
 function PlannerForm({ initialQuery }: { initialQuery: string }) {
   const router = useRouter();
   const [prompt, setPrompt] = React.useState(initialQuery);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [threads, setThreads] = React.useState<StoredThreadItem[]>(() =>
-    readStoredThreads()
+  const isClient = React.useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false
+  );
+  const [threadsOverride, setThreadsOverride] = React.useState<
+    StoredThreadItem[] | null
+  >(null);
+  const threads = React.useMemo(
+    () => threadsOverride ?? (isClient ? readStoredThreads() : []),
+    [threadsOverride, isClient]
   );
 
   React.useEffect(() => {
@@ -66,7 +77,7 @@ function PlannerForm({ initialQuery }: { initialQuery: string }) {
           : "streaming",
         updatedAt: Date.now(),
       });
-      setThreads(updated);
+      setThreadsOverride(updated);
 
       if (typeof window !== "undefined") {
         window.sessionStorage.setItem(
