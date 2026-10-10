@@ -12,14 +12,14 @@ export default function Image() {
     (
       <div
         style={{
-          background: "#0a0a0a",
+          background: "#0b120e",
           width: "100%",
           height: "100%",
           display: "flex",
           flexDirection: "column",
           justifyContent: "space-between",
           padding: "72px 80px",
-          color: "#fafafa",
+          color: "#f4f7f5",
           fontFamily: "sans-serif",
         }}
       >
@@ -61,7 +61,7 @@ export default function Image() {
           <div
             style={{
               fontSize: "26px",
-              color: "#a3a3a3",
+              color: "#9aa8a0",
               maxWidth: "760px",
               lineHeight: 1.4,
             }}
@@ -77,7 +77,7 @@ export default function Image() {
             alignItems: "center",
             gap: "18px",
             fontSize: "18px",
-            color: "#a3a3a3",
+            color: "#9aa8a0",
           }}
         >
           <span>LangGraph</span>

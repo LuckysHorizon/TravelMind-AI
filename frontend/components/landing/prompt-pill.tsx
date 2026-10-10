@@ -38,7 +38,7 @@ export function PromptPill({
     <form
       onSubmit={handleSubmit}
       className={cn(
-        "mx-auto flex w-full max-w-[540px] items-center gap-2 rounded-[var(--r-pill)] border border-[var(--border)] bg-[var(--surface)] p-1.5 pl-5 shadow-[0_14px_40px_rgba(0,0,0,0.08)] transition-colors duration-[var(--dur-1)] focus-within:border-[var(--border-strong)]",
+        "mx-auto flex w-full max-w-[540px] items-center gap-2 rounded-[var(--r-pill)] border border-[var(--border)] bg-[var(--surface)] p-1.5 pl-5 shadow-[0_14px_40px_rgba(11,18,14,0.08)] transition-colors duration-[var(--dur-1)] focus-within:border-[var(--border-strong)]",
         className
       )}
     >

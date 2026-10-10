@@ -16,7 +16,7 @@ const SheetOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     className={cn(
-      "fixed inset-0 z-50 bg-black/50 transition-opacity duration-[var(--dur-2)]",
+      "fixed inset-0 z-50 bg-[var(--bg)]/70 backdrop-blur-xs transition-opacity duration-[var(--dur-2)]",
       className
     )}
     {...props}

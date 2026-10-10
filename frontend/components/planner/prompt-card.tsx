@@ -46,7 +46,7 @@ export function PromptCard({
   return (
     <Card
       className={cn(
-        "mx-auto w-full max-w-[680px] p-5 shadow-[0_18px_50px_rgba(0,0,0,0.05)] sm:p-6",
+        "mx-auto w-full max-w-[680px] p-5 shadow-[0_18px_50px_rgba(11,18,14,0.05)] sm:p-6",
         className
       )}
     >
