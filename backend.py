@@ -134,7 +134,7 @@ AGENT_ORDER = [
         "itinerary_agent",
 ]
 DAY_PATTERN = re.compile(
-    r"(?ms)^###\s*Day\s+(\d+)\s*[-–—:]\s*.*?(?=^###\s*Day\s+\d+\s*[-–—:]|\Z)"
+    r"(?ms)^###\s*Day\s+(\d+)\s*[-–—:]\s*.*?(?=^###\s*Day\s+\d+\s*[-–—:]|^(?:#{1,4}\s*(?:\*\*|__)?(?:Total\s+Estimated|Trip\s+Summary|Summary|Practical\s+Tips|Important\s+Travel|Estimated\s+Total|Budget\s+Summary|Overall\s+Cost|Travel\s+Tips|Final\s+Notes)|\*\*(?:Total\s+estimated\s+trip\s+cost|Practical\s+tips|Important\s+travel\s+considerations)\*\*)|\Z)"
 )
 
 
@@ -1471,22 +1471,590 @@ def resume_travel_agent(
         "feedback": feedback.strip()
     }, flush=True)
 
-    result = travel_graph.invoke(
-        Command(
-            resume={
-                "approved": approved,
-                "feedback": feedback.strip(),
-            }
-        ),
-        config=config,
-    )
+    with _DB_LOCK:
+        result = travel_graph.invoke(
+            Command(
+                resume={
+                    "approved": approved,
+                    "feedback": feedback.strip(),
+                }
+            ),
+            config=config,
+        )
 
-    print("RESUME RESULT KEYS:", list(result.keys()), flush=True)
-    print("RESUME INTERRUPT:", result.get("__interrupt__"), flush=True)
+        print("RESUME RESULT KEYS:", list(result.keys()), flush=True)
+        print("RESUME INTERRUPT:", result.get("__interrupt__"), flush=True)
 
-    snapshot = travel_graph.get_state(config)
+        snapshot = travel_graph.get_state(config)
 
     print("RESUME SNAPSHOT NEXT:", snapshot.next, flush=True)
     print("RESUME SNAPSHOT TASKS:", snapshot.tasks, flush=True)
 
     return _serialize_result(result, thread_id)
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: Non-blocking execution, Snapshot & SSE Event Stream
+# ---------------------------------------------------------------------------
+import threading
+import time
+import traceback
+
+_DB_LOCK = threading.RLock()
+_SESSIONS_LOCK = threading.RLock()
+_SESSIONS: dict[str, dict[str, Any]] = {}
+
+_AGENT_TOOLS = {
+    "supervisor": "route_agents",
+    "flight_agent": "aviationstack.flights",
+    "hotel_agent": "tavily.search",
+    "weather_agent": "openweather.forecast",
+    "budget_agent": "budget.feasibility",
+    "itinerary_agent": "synthesize_itinerary",
+}
+
+_AGENT_RUNNING_MESSAGES = {
+    "supervisor": "Checking request and routing specialist agents…",
+    "flight_agent": "Searching airports and airlines for your route…",
+    "hotel_agent": "Searching stays, neighborhoods and ratings…",
+    "weather_agent": "Checking current conditions and forecast…",
+    "budget_agent": "Estimating costs, risks and ways to save…",
+    "itinerary_agent": "Synthesizing day-by-day plan with times and costs…",
+}
+
+_AGENT_DONE_MESSAGES = {
+    "supervisor": "Routed request to specialist agents.",
+    "flight_agent": "Airports and airline options analyzed.",
+    "hotel_agent": "Hotel options and neighborhood stays gathered.",
+    "weather_agent": "Current weather and forecast checked.",
+    "budget_agent": "Budget breakdown and feasibility complete.",
+    "itinerary_agent": "Draft itinerary ready for your review.",
+}
+
+
+def _format_trace_ts(seconds: float) -> str:
+    total = max(0, int(seconds))
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
+def _append_step_event(
+    session: dict[str, Any],
+    agent: str,
+    status: str,
+    tool: str,
+    message: str,
+) -> None:
+    elapsed = round(max(0.1, time.monotonic() - session["started_at"]), 1)
+    session["elapsed"] = elapsed
+    session["steps"][agent] = status
+
+    short_agent = agent.replace("_agent", "")
+    for trace in session["traces"]:
+        trace["active"] = False
+
+    session["traces"].append(
+        {
+            "id": f"{agent}-{tool}-{len(session['traces'])}",
+            "time": _format_trace_ts(elapsed),
+            "agent": short_agent,
+            "tool": tool,
+            "status": "done" if status == "done" else ("failed" if status == "failed" else ""),
+            "active": status == "running",
+        }
+    )
+
+    session["events"].append(
+        {
+            "type": "step",
+            "agent": agent,
+            "status": status,
+            "tool": tool,
+            "message": message,
+            "t": elapsed,
+        }
+    )
+
+
+def _next_selected_agent(selected_agents: list[str], current_agent: str | None) -> str | None:
+    ordered = [a for a in AGENT_ORDER if a in selected_agents]
+    if not ordered:
+        ordered = ["itinerary_agent"]
+    if current_agent is None:
+        return ordered[0]
+    if current_agent in ordered:
+        idx = ordered.index(current_agent)
+        if idx + 1 < len(ordered):
+            return ordered[idx + 1]
+    return None
+
+
+def _execute_initial_stream_worker(thread_id: str, user_input: str) -> None:
+    session = _SESSIONS.get(thread_id)
+    if not session:
+        return
+
+    config = {"configurable": {"thread_id": thread_id}}
+    initial_state: TravelState = {
+        "messages": [HumanMessage(content=user_input)],
+        "user_query": user_input,
+        "guardrail_allowed": True,
+        "guardrail_reason": "",
+        "selected_agents": [],
+        "trip_constraints": _empty_constraints(),
+        "supervisor_reasoning": "",
+        "flight_results": "",
+        "hotel_results": "",
+        "weather_results": "",
+        "budget_results": "",
+        "itinerary": "",
+        "approval_request": "",
+        "approved": False,
+        "human_feedback": "",
+        "final_response": "",
+        "llm_calls": 0,
+    }
+
+    try:
+        with _SESSIONS_LOCK:
+            _append_step_event(
+                session,
+                agent="supervisor",
+                status="running",
+                tool="guardrail_check",
+                message=_AGENT_RUNNING_MESSAGES["supervisor"],
+            )
+
+        accumulated: dict[str, Any] = dict(initial_state)
+        selected_agents: list[str] = []
+
+        with _DB_LOCK:
+            for chunk in travel_graph.stream(
+                initial_state,
+                config=config,
+                stream_mode="updates",
+            ):
+                if not isinstance(chunk, dict):
+                    continue
+
+                for node_name, node_update in chunk.items():
+                    if node_name == "__interrupt__":
+                        accumulated["__interrupt__"] = node_update
+                        continue
+
+                    if isinstance(node_update, dict):
+                        accumulated.update(node_update)
+
+                    with _SESSIONS_LOCK:
+                        if node_name == "supervisor":
+                            allowed = bool(accumulated.get("guardrail_allowed", True))
+                            reason = str(accumulated.get("guardrail_reason", ""))
+                            constraints = accumulated.get("trip_constraints") or _empty_constraints()
+                            selected_agents = list(accumulated.get("selected_agents") or [])
+
+                            session["trip_constraints"] = constraints
+                            session["events"].append(
+                                {
+                                    "type": "guardrail",
+                                    "allowed": allowed,
+                                    "reason": reason,
+                                }
+                            )
+
+                            if allowed:
+                                session["events"].append(
+                                    {
+                                        "type": "constraints",
+                                        "data": constraints,
+                                    }
+                                )
+                                _append_step_event(
+                                    session,
+                                    agent="supervisor",
+                                    status="done",
+                                    tool="route_agents",
+                                    message=f"Routed to {len(selected_agents) or 5} specialist agents.",
+                                )
+                                for candidate in AGENT_ORDER:
+                                    if selected_agents and candidate not in selected_agents:
+                                        session["steps"][candidate] = "skipped"
+                                        session["events"].append(
+                                            {
+                                                "type": "step",
+                                                "agent": candidate,
+                                                "status": "skipped",
+                                                "tool": "skip",
+                                                "message": "Skipped for this trip",
+                                                "t": round(
+                                                    max(0.1, time.monotonic() - session["started_at"]),
+                                                    1,
+                                                ),
+                                            }
+                                        )
+                                first_agent = _next_selected_agent(selected_agents, None)
+                                if first_agent:
+                                    _append_step_event(
+                                        session,
+                                        agent=first_agent,
+                                        status="running",
+                                        tool=_AGENT_TOOLS.get(first_agent, first_agent),
+                                        message=_AGENT_RUNNING_MESSAGES.get(first_agent, "Working…"),
+                                    )
+                            else:
+                                _append_step_event(
+                                    session,
+                                    agent="supervisor",
+                                    status="done",
+                                    tool="guardrail_check",
+                                    message=reason or "Request blocked by travel guardrail.",
+                                )
+
+                        elif node_name in KNOWN_AGENTS:
+                            _append_step_event(
+                                session,
+                                agent=node_name,
+                                status="done",
+                                tool=_AGENT_TOOLS.get(node_name, node_name),
+                                message=_AGENT_DONE_MESSAGES.get(node_name, "Done"),
+                            )
+                            next_agent = _next_selected_agent(selected_agents, node_name)
+                            if next_agent:
+                                _append_step_event(
+                                    session,
+                                    agent=next_agent,
+                                    status="running",
+                                    tool=_AGENT_TOOLS.get(next_agent, next_agent),
+                                    message=_AGENT_RUNNING_MESSAGES.get(next_agent, "Working…"),
+                                )
+
+        serialized = _serialize_result(accumulated, thread_id)
+        with _SESSIONS_LOCK:
+            for trace in session["traces"]:
+                trace["active"] = False
+            session["payload"] = serialized
+            session["trip_constraints"] = serialized.get("trip_constraints") or session["trip_constraints"]
+            session["elapsed"] = round(max(0.1, time.monotonic() - session["started_at"]), 1)
+
+            if not serialized.get("guardrail_allowed", True):
+                session["status"] = "blocked"
+            elif serialized.get("requires_approval"):
+                session["status"] = "awaiting_approval"
+                session["events"].append(
+                    {
+                        "type": "interrupt",
+                        "requires_approval": True,
+                    }
+                )
+            else:
+                session["status"] = "approved"
+
+            session["events"].append(
+                {
+                    "type": "final",
+                    "payload": serialized,
+                }
+            )
+            session["done"] = True
+
+    except Exception as exc:
+        traceback.print_exc()
+        with _SESSIONS_LOCK:
+            for trace in session["traces"]:
+                trace["active"] = False
+            session["status"] = "error"
+            session["error"] = str(exc)
+            session["events"].append(
+                {
+                    "type": "error",
+                    "message": str(exc),
+                }
+            )
+            session["done"] = True
+
+
+def _execute_revision_stream_worker(thread_id: str, feedback: str) -> None:
+    session = _SESSIONS.get(thread_id)
+    if not session:
+        return
+
+    config = {"configurable": {"thread_id": thread_id}}
+    try:
+        with _SESSIONS_LOCK:
+            _append_step_event(
+                session,
+                agent="itinerary_agent",
+                status="running",
+                tool="revise_days",
+                message="Rewriting affected itinerary day sections…",
+            )
+
+        with _DB_LOCK:
+            result = travel_graph.invoke(
+                Command(
+                    resume={
+                        "approved": False,
+                        "feedback": feedback.strip(),
+                    }
+                ),
+                config=config,
+            )
+
+        serialized = _serialize_result(result, thread_id)
+        with _SESSIONS_LOCK:
+            _append_step_event(
+                session,
+                agent="itinerary_agent",
+                status="done",
+                tool="revise_days",
+                message="Updated itinerary ready for review.",
+            )
+            for trace in session["traces"]:
+                trace["active"] = False
+            session["payload"] = serialized
+            session["status"] = (
+                "awaiting_approval" if serialized.get("requires_approval") else "approved"
+            )
+            if serialized.get("requires_approval"):
+                session["events"].append(
+                    {
+                        "type": "interrupt",
+                        "requires_approval": True,
+                    }
+                )
+            session["events"].append(
+                {
+                    "type": "final",
+                    "payload": serialized,
+                }
+            )
+            session["done"] = True
+
+    except Exception as exc:
+        traceback.print_exc()
+        with _SESSIONS_LOCK:
+            for trace in session["traces"]:
+                trace["active"] = False
+            session["status"] = "error"
+            session["error"] = str(exc)
+            session["events"].append(
+                {
+                    "type": "error",
+                    "message": str(exc),
+                }
+            )
+            session["done"] = True
+
+
+def start_travel_agent_stream(
+    user_input: str,
+    thread_id: str | None = None,
+) -> dict[str, Any]:
+    """Start a new trip run in a background worker thread and return thread_id immediately."""
+    if not thread_id:
+        thread_id = f"user_{uuid.uuid4().hex}"
+
+    with _SESSIONS_LOCK:
+        _SESSIONS[thread_id] = {
+            "thread_id": thread_id,
+            "user_query": user_input,
+            "status": "streaming",
+            "started_at": time.monotonic(),
+            "elapsed": 0.0,
+            "steps": {
+                "supervisor": "running",
+                "flight_agent": "queued",
+                "hotel_agent": "queued",
+                "weather_agent": "queued",
+                "budget_agent": "queued",
+                "itinerary_agent": "queued",
+            },
+            "traces": [],
+            "trip_constraints": _empty_constraints(),
+            "payload": None,
+            "error": "",
+            "events": [],
+            "done": False,
+        }
+
+    worker = threading.Thread(
+        target=_execute_initial_stream_worker,
+        args=(thread_id, user_input),
+        daemon=True,
+    )
+    worker.start()
+
+    return {
+        "thread_id": thread_id,
+        "status": "streaming",
+    }
+
+
+def start_resume_travel_agent_stream(
+    thread_id: str,
+    approved: bool,
+    feedback: str = "",
+) -> dict[str, Any]:
+    """Approve a trip synchronously or start a revision stream in the background."""
+    if approved:
+        serialized = resume_travel_agent(
+            thread_id=thread_id,
+            approved=True,
+            feedback="",
+        )
+        with _SESSIONS_LOCK:
+            existing = _SESSIONS.get(thread_id)
+            if existing:
+                existing["status"] = "approved"
+                existing["payload"] = serialized
+                existing["done"] = True
+        return serialized
+
+    with _SESSIONS_LOCK:
+        session = _SESSIONS.get(thread_id)
+        if not session:
+            session = {
+                "thread_id": thread_id,
+                "user_query": "",
+                "status": "revising",
+                "started_at": time.monotonic(),
+                "elapsed": 0.0,
+                "steps": {
+                    "supervisor": "done",
+                    "flight_agent": "done",
+                    "hotel_agent": "done",
+                    "weather_agent": "done",
+                    "budget_agent": "done",
+                    "itinerary_agent": "running",
+                },
+                "traces": [],
+                "trip_constraints": _empty_constraints(),
+                "payload": None,
+                "error": "",
+                "events": [],
+                "done": False,
+            }
+            _SESSIONS[thread_id] = session
+        else:
+            session["status"] = "revising"
+            session["started_at"] = time.monotonic()
+            session["steps"]["itinerary_agent"] = "running"
+            session["error"] = ""
+            session["events"] = []
+            session["done"] = False
+
+    worker = threading.Thread(
+        target=_execute_revision_stream_worker,
+        args=(thread_id, feedback),
+        daemon=True,
+    )
+    worker.start()
+
+    return {
+        "thread_id": thread_id,
+        "status": "revising",
+    }
+
+
+def get_trip_snapshot(thread_id: str) -> dict[str, Any] | None:
+    """Return the current trip snapshot from memory or Postgres checkpointer."""
+    with _SESSIONS_LOCK:
+        session = _SESSIONS.get(thread_id)
+        if session:
+            elapsed = (
+                round(max(0.1, time.monotonic() - session["started_at"]), 1)
+                if not session["done"]
+                else session["elapsed"]
+            )
+            return {
+                "thread_id": thread_id,
+                "status": session["status"],
+                "user_query": session.get("user_query", ""),
+                "trip_constraints": session.get("trip_constraints") or _empty_constraints(),
+                "payload": session.get("payload"),
+                "error": session.get("error", ""),
+                "elapsed": elapsed,
+                "steps": dict(session.get("steps", {})),
+                "traces": list(session.get("traces", [])),
+            }
+
+    config = {"configurable": {"thread_id": thread_id}}
+    try:
+        with _DB_LOCK:
+            snapshot = travel_graph.get_state(config)
+    except Exception:
+        return None
+
+    if not snapshot or not getattr(snapshot, "values", None):
+        return None
+
+    values = dict(snapshot.values)
+    tasks = getattr(snapshot, "tasks", ()) or ()
+    has_interrupt = False
+    for task in tasks:
+        task_interrupts = getattr(task, "interrupts", ()) or ()
+        if task_interrupts:
+            values["__interrupt__"] = list(task_interrupts)
+            has_interrupt = True
+            break
+
+    serialized = _serialize_result(values, thread_id)
+    if not serialized.get("guardrail_allowed", True):
+        status = "blocked"
+    elif has_interrupt or serialized.get("requires_approval"):
+        status = "awaiting_approval"
+    else:
+        status = "approved"
+
+    selected = set(serialized.get("selected_agents") or [])
+    steps = {
+        "supervisor": "done",
+        "flight_agent": "done" if (not selected or "flight_agent" in selected) else "skipped",
+        "hotel_agent": "done" if (not selected or "hotel_agent" in selected) else "skipped",
+        "weather_agent": "done" if (not selected or "weather_agent" in selected) else "skipped",
+        "budget_agent": "done" if (not selected or "budget_agent" in selected) else "skipped",
+        "itinerary_agent": "done" if status != "blocked" else "skipped",
+    }
+
+    return {
+        "thread_id": thread_id,
+        "status": status,
+        "user_query": str(values.get("user_query", "")),
+        "trip_constraints": serialized.get("trip_constraints") or _empty_constraints(),
+        "payload": serialized,
+        "error": "",
+        "elapsed": 0,
+        "steps": steps,
+        "traces": [],
+    }
+
+
+async def subscribe_trip_events(thread_id: str):
+    """Async generator yielding Server-Sent Events (SSE) for a trip run."""
+    cursor = 0
+    while True:
+        with _SESSIONS_LOCK:
+            session = _SESSIONS.get(thread_id)
+            if session is not None:
+                pending = session["events"][cursor:]
+                cursor += len(pending)
+                is_done = bool(session["done"])
+            else:
+                pending = []
+                is_done = True
+
+        if session is None:
+            snapshot = get_trip_snapshot(thread_id)
+            if snapshot and snapshot.get("payload"):
+                if snapshot.get("status") == "awaiting_approval":
+                    yield f"data: {json.dumps({'type': 'interrupt', 'requires_approval': True})}\n\n"
+                yield f"data: {json.dumps({'type': 'final', 'payload': snapshot['payload']}, ensure_ascii=False)}\n\n"
+            else:
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Trip session not found.'})}\n\n"
+            break
+
+        for evt in pending:
+            yield f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
+
+        if is_done:
+            break
+
+        await asyncio.sleep(0.15)

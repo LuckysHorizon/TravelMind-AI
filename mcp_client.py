@@ -239,7 +239,7 @@ async def aviation_mcp_call(
     tool_args: dict[str, Any] | None = None,
 ):
     aviation_tool = await _get_server_tool(
-        "aviationstack",
+        "Aviationstack MCP",
         tool_name,
     )
 
