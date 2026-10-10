@@ -87,6 +87,24 @@ test.describe("TravelMind AI — Responsive, Accessibility & Full Flow E2E", () 
     const htmlTheme = await page.locator("html").getAttribute("data-theme");
     expect(htmlTheme).toBe("dark");
 
+    // Verify tinted dark background token (#0b120e -> rgb(11, 18, 14))
+    const bodyBg = await page.evaluate(
+      () => window.getComputedStyle(document.body).backgroundColor
+    );
+    expect(bodyBg).toBe("rgb(11, 18, 14)");
+
+    // Verify TechLogoStrip ("Built on" + 5 provider links)
+    await expect(page.getByText("Built on", { exact: true })).toBeVisible();
+    for (const provider of [
+      "LangGraph",
+      "Groq",
+      "Tavily",
+      "AviationStack",
+      "OpenWeather",
+    ]) {
+      await expect(page.getByRole("link", { name: provider })).toBeVisible();
+    }
+
     // Check no horizontal overflow on desktop
     const overflowDesktop = await page.evaluate(
       () => document.documentElement.scrollWidth > window.innerWidth
@@ -106,7 +124,7 @@ test.describe("TravelMind AI — Responsive, Accessibility & Full Flow E2E", () 
     );
     expect(seriousViolations).toEqual([]);
 
-    // Mobile viewport (390px)
+    // Mobile viewport (390px and 360px)
     await page.setViewportSize({ width: 390, height: 844 });
     await page.waitForTimeout(200);
 
@@ -119,6 +137,79 @@ test.describe("TravelMind AI — Responsive, Accessibility & Full Flow E2E", () 
       path: path.join(AFTER_DIR, "landing-mobile.png"),
       fullPage: true,
     });
+
+    await page.setViewportSize({ width: 360, height: 800 });
+    await page.waitForTimeout(150);
+    const overflow360 = await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth
+    );
+    expect(overflow360).toBe(false);
+  });
+
+  test("GalleryScroller supports Next-to-end, disabled state, hover pause, ArrowRight, and reduced motion", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/");
+
+    const scroller = page.getByRole("region", {
+      name: /Sample agent output cards/i,
+    });
+    const prevBtn = page.getByRole("button", { name: /Previous cards/i });
+    const nextBtn = page.getByRole("button", { name: /Next cards/i });
+    const pauseBtn = page.getByRole("button", {
+      name: /Pause auto-scroll|Play auto-scroll/i,
+    });
+
+    await expect(scroller).toBeVisible();
+
+    // Jump to start with Home to deterministically verify start disabled state
+    await scroller.focus();
+    await scroller.press("Home");
+    await expect(prevBtn).toBeDisabled();
+    await expect(nextBtn).toBeEnabled();
+    await expect(scroller).toHaveAttribute("data-at-start", "true");
+    await expect(scroller).toHaveAttribute("data-at-end", "false");
+
+    // Keyboard ArrowRight scrolls one card right
+    await scroller.press("ArrowRight");
+    const scrollAfterArrowRight = await scroller.evaluate((el) => el.scrollLeft);
+    expect(scrollAfterArrowRight).toBeGreaterThan(0);
+    await expect(scroller).toHaveAttribute("data-at-start", "false");
+    await expect(prevBtn).toBeEnabled();
+
+    // Hover pause: hovering over the gallery keeps scrollLeft steady
+    await scroller.hover();
+    const scrollBeforeHoverWait = await scroller.evaluate((el) => el.scrollLeft);
+    await page.waitForTimeout(300);
+    const scrollAfterHoverWait = await scroller.evaluate((el) => el.scrollLeft);
+    expect(scrollAfterHoverWait).toBe(scrollBeforeHoverWait);
+
+    // Next-to-end disables Next button and sets data-at-end="true"
+    for (let i = 0; i < 12; i++) {
+      if (await nextBtn.isDisabled()) break;
+      await nextBtn.click();
+    }
+    await expect(nextBtn).toBeDisabled();
+    await expect(scroller).toHaveAttribute("data-at-end", "true");
+
+    // Pause/Play toggle button updates aria-pressed
+    await expect(pauseBtn).toHaveAttribute("aria-pressed", "false");
+    await pauseBtn.click();
+    await expect(pauseBtn).toHaveAttribute("aria-pressed", "true");
+
+    // Reduced motion disables clones and auto-scroll
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/");
+    await expect(
+      page.locator('[data-gallery-card="primary"]')
+    ).toHaveCount(8);
+    await expect(
+      page.locator('[data-gallery-card="clone"]')
+    ).toHaveCount(0);
+    await page.waitForTimeout(400);
+    const reducedScrollLeft = await scroller.evaluate((el) => el.scrollLeft);
+    expect(reducedScrollLeft).toBe(0);
   });
 
   test("Planner page (/app) renders light theme, presets, recent trips, and passes axe", async ({

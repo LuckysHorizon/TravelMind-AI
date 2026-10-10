@@ -1,114 +1,255 @@
+"use client";
+
 import * as React from "react";
-import { Card } from "@/components/ui/card";
-import { Chip } from "@/components/ui/chip";
+import { ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
+import { GalleryCard } from "@/components/landing/GalleryCard";
+import { GALLERY_CARDS } from "@/components/landing/gallery-cards";
+import { useAutoScroll } from "@/hooks/useAutoScroll";
+import { useDragScroll } from "@/hooks/useDragScroll";
+import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { cn } from "@/lib/utils";
-
-interface GalleryCardData {
-  tag: string;
-  title: string;
-  offset: boolean;
-  rows: Array<{ label: string; value: string }>;
-}
-
-const GALLERY_CARDS: GalleryCardData[] = [
-  {
-    tag: "Itinerary",
-    title: "Tokyo, 5 days",
-    offset: false,
-    rows: [
-      { label: "09:00 Senso-ji", value: "Free" },
-      { label: "12:30 Tsukiji lunch", value: "$20" },
-      { label: "15:00 teamLab", value: "$30" },
-    ],
-  },
-  {
-    tag: "Weather",
-    title: "Dubai weekend",
-    offset: true,
-    rows: [
-      { label: "Fri", value: "Sunny" },
-      { label: "Sat", value: "Clear" },
-      { label: "Sun", value: "Warm" },
-    ],
-  },
-  {
-    tag: "Flights",
-    title: "Lisbon routes",
-    offset: false,
-    rows: [
-      { label: "Airports", value: "3 found" },
-      { label: "Airlines", value: "Matched" },
-    ],
-  },
-  {
-    tag: "Budget",
-    title: "Bangkok, 4 days",
-    offset: true,
-    rows: [
-      { label: "Stay", value: "Mid-range" },
-      { label: "Food", value: "Low" },
-      { label: "Transit", value: "Low" },
-    ],
-  },
-  {
-    tag: "Hotels",
-    title: "Kyoto stays",
-    offset: false,
-    rows: [
-      { label: "Ryokan", value: "Top rated" },
-      { label: "Central", value: "Near station" },
-    ],
-  },
-];
 
 export interface GalleryScrollerProps {
   className?: string;
 }
 
 export function GalleryScroller({ className }: GalleryScrollerProps) {
+  const sectionRef = React.useRef<HTMLElement>(null);
+  const scrollerRef = React.useRef<HTMLDivElement>(null);
+  const firstPrimaryRef = React.useRef<HTMLDivElement>(null);
+  const secondPrimaryRef = React.useRef<HTMLDivElement>(null);
+  const firstCloneRef = React.useRef<HTMLDivElement>(null);
+
+  const reducedMotion = useReducedMotion();
+  const [atStart, setAtStart] = React.useState(true);
+  const [atEnd, setAtEnd] = React.useState(false);
+
+  const getCardStep = React.useCallback((): number => {
+    if (firstPrimaryRef.current && secondPrimaryRef.current) {
+      const step =
+        secondPrimaryRef.current.offsetLeft - firstPrimaryRef.current.offsetLeft;
+      if (step > 0) return step;
+    }
+    if (firstPrimaryRef.current) {
+      return firstPrimaryRef.current.offsetWidth + 16;
+    }
+    return 256;
+  }, []);
+
+  const getLoopWidth = React.useCallback((): number => {
+    if (firstPrimaryRef.current && firstCloneRef.current) {
+      const width =
+        firstCloneRef.current.offsetLeft - firstPrimaryRef.current.offsetLeft;
+      if (width > 0) return width;
+    }
+    const el = scrollerRef.current;
+    return el ? Math.floor(el.scrollWidth / 2) : 0;
+  }, []);
+
+  const updateScrollBounds = React.useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth);
+    const nextAtStart = el.scrollLeft <= 2;
+    const nextAtEnd = maxScroll <= 2 || el.scrollLeft >= maxScroll - 2;
+    setAtStart((prev) => (prev === nextAtStart ? prev : nextAtStart));
+    setAtEnd((prev) => (prev === nextAtEnd ? prev : nextAtEnd));
+  }, []);
+
+  const {
+    userPaused,
+    isPaused,
+    toggleUserPause,
+    notifyInteractionStart,
+    notifyInteractionEnd,
+    notifyTransientInteraction,
+    interactionHandlers,
+  } = useAutoScroll({
+    scrollerRef,
+    sectionRef,
+    disabled: reducedMotion,
+    speedPxPerFrame: 0.4,
+    resumeDelayMs: 2000,
+    getLoopWidth,
+  });
+
+  const { isDragging, dragHandlers } = useDragScroll({
+    scrollerRef,
+    onDragStart: notifyInteractionStart,
+    onDragEnd: notifyInteractionEnd,
+  });
+
+  React.useEffect(() => {
+    updateScrollBounds();
+    const el = scrollerRef.current;
+    if (!el) return;
+
+    const handleResize = () => updateScrollBounds();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [updateScrollBounds, reducedMotion]);
+
+  const handleScroll = React.useCallback(() => {
+    updateScrollBounds();
+  }, [updateScrollBounds]);
+
+  const handleWheel = React.useCallback<React.WheelEventHandler<HTMLDivElement>>(
+    (event) => {
+      notifyTransientInteraction();
+      const el = scrollerRef.current;
+      if (!el) return;
+      if (event.shiftKey && event.deltaY !== 0 && event.deltaX === 0) {
+        event.preventDefault();
+        el.scrollLeft += event.deltaY;
+        updateScrollBounds();
+      }
+    },
+    [notifyTransientInteraction, updateScrollBounds]
+  );
+
+  const handleKeyDown = React.useCallback<
+    React.KeyboardEventHandler<HTMLDivElement>
+  >(
+    (event) => {
+      const el = scrollerRef.current;
+      if (!el) return;
+      const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth);
+      const step = getCardStep();
+
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        notifyTransientInteraction();
+        el.scrollLeft = Math.min(maxScroll, el.scrollLeft + step);
+        updateScrollBounds();
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        notifyTransientInteraction();
+        el.scrollLeft = Math.max(0, el.scrollLeft - step);
+        updateScrollBounds();
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        notifyTransientInteraction();
+        el.scrollLeft = 0;
+        updateScrollBounds();
+      } else if (event.key === "End") {
+        event.preventDefault();
+        notifyTransientInteraction();
+        el.scrollLeft = maxScroll;
+        updateScrollBounds();
+      }
+    },
+    [getCardStep, notifyTransientInteraction, updateScrollBounds]
+  );
+
+  const handlePrev = React.useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    notifyTransientInteraction();
+    const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth);
+    const step = Math.max(getCardStep() * 2, Math.ceil(maxScroll / 5));
+    el.scrollLeft = Math.max(0, el.scrollLeft - step);
+    updateScrollBounds();
+  }, [getCardStep, notifyTransientInteraction, updateScrollBounds]);
+
+  const handleNext = React.useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    notifyTransientInteraction();
+    const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth);
+    const step = Math.max(getCardStep() * 2, Math.ceil(maxScroll / 5));
+    el.scrollLeft = Math.min(maxScroll, el.scrollLeft + step);
+    updateScrollBounds();
+  }, [getCardStep, notifyTransientInteraction, updateScrollBounds]);
+
   return (
     <section
+      ref={sectionRef}
       aria-label="Sample agent outputs"
       className={cn(
         "mx-auto w-full max-w-[var(--container)] py-6 sm:py-10",
         className
       )}
+      {...interactionHandlers}
     >
+      <div className="mb-3 flex items-center justify-end gap-2 px-4 sm:px-6">
+        <button
+          type="button"
+          onClick={toggleUserPause}
+          aria-pressed={userPaused}
+          aria-label={userPaused ? "Play auto-scroll" : "Pause auto-scroll"}
+          title={userPaused ? "Play auto-scroll" : "Pause auto-scroll"}
+          className="inline-flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-[var(--r-pill)] border border-[var(--border)] bg-[var(--surface)] text-[var(--text-2)] transition-colors duration-[var(--dur-1)] ease-[var(--ease)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)] hover:text-[var(--text)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--text)] cursor-pointer"
+        >
+          {userPaused ? (
+            <Play className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+          ) : (
+            <Pause className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={handlePrev}
+          disabled={atStart}
+          aria-label="Previous cards"
+          className="hidden h-[44px] w-[44px] shrink-0 items-center justify-center rounded-[var(--r-pill)] border border-[var(--border)] bg-[var(--surface)] text-[var(--text-2)] transition-colors duration-[var(--dur-1)] ease-[var(--ease)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)] hover:text-[var(--text)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--text)] disabled:pointer-events-none disabled:opacity-40 cursor-pointer md:inline-flex"
+        >
+          <ChevronLeft className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+        </button>
+
+        <button
+          type="button"
+          onClick={handleNext}
+          disabled={atEnd}
+          aria-label="Next cards"
+          className="hidden h-[44px] w-[44px] shrink-0 items-center justify-center rounded-[var(--r-pill)] border border-[var(--border)] bg-[var(--surface)] text-[var(--text-2)] transition-colors duration-[var(--dur-1)] ease-[var(--ease)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)] hover:text-[var(--text)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--text)] disabled:pointer-events-none disabled:opacity-40 cursor-pointer md:inline-flex"
+        >
+          <ChevronRight className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+        </button>
+      </div>
+
       <div
+        ref={scrollerRef}
         role="region"
         aria-label="Sample agent output cards"
         tabIndex={0}
-        className="gallery-mask no-scrollbar flex gap-4 overflow-x-auto px-4 pb-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--text)] sm:gap-5 sm:px-6"
+        data-at-start={atStart ? "true" : "false"}
+        data-at-end={atEnd ? "true" : "false"}
+        onScroll={handleScroll}
+        onWheel={handleWheel}
+        onKeyDown={handleKeyDown}
+        {...dragHandlers}
+        className={cn(
+          "gallery-mask no-scrollbar flex gap-4 overflow-x-auto overscroll-x-contain px-4 scroll-px-4 pt-1 pb-12 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--text)] sm:px-6 sm:scroll-px-6",
+          isPaused && !isDragging ? "snap-x snap-proximity" : "snap-none",
+          isDragging ? "cursor-grabbing select-none" : "cursor-grab"
+        )}
       >
-        {GALLERY_CARDS.map((card) => (
-          <Card
-            key={card.title}
-            className={cn(
-              "w-[228px] shrink-0 p-5 sm:w-[240px]",
-              card.offset && "mt-7"
-            )}
-          >
-            <div className="mb-4">
-              <Chip asSpan className="text-xs text-[var(--text-2)]">
-                {card.tag}
-              </Chip>
-            </div>
-            <h2 className="mb-4 font-serif text-2xl font-normal tracking-[-0.01em] text-[var(--text)]">
-              {card.title}
-            </h2>
-            <dl className="divide-y divide-[var(--border)] text-xs">
-              {card.rows.map((row) => (
-                <div
-                  key={row.label}
-                  className="flex items-center justify-between gap-2 py-2.5 first:pt-1 last:pb-0"
-                >
-                  <dt className="text-[var(--text-2)]">{row.label}</dt>
-                  <dd className="text-[var(--muted)]">{row.value}</dd>
-                </div>
-              ))}
-            </dl>
-          </Card>
+        {GALLERY_CARDS.map((card, index) => (
+          <GalleryCard
+            key={card.id}
+            ref={
+              index === 0
+                ? firstPrimaryRef
+                : index === 1
+                  ? secondPrimaryRef
+                  : undefined
+            }
+            card={card}
+            staggered={index % 2 === 1}
+          />
         ))}
+
+        {!reducedMotion &&
+          GALLERY_CARDS.map((card, index) => (
+            <GalleryCard
+              key={`clone-${card.id}`}
+              ref={index === 0 ? firstCloneRef : undefined}
+              card={card}
+              staggered={index % 2 === 1}
+              isClone
+            />
+          ))}
       </div>
     </section>
   );

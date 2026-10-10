@@ -53,7 +53,7 @@ export function TechLogoStrip({ className }: TechLogoStripProps) {
       <p className="text-[13px] font-normal tracking-[0.01em] text-[var(--muted)]">
         Built on
       </p>
-      <ul className="flex flex-wrap items-center justify-center gap-x-7 gap-y-4 sm:gap-x-10 sm:gap-y-5">
+      <ul className="flex flex-wrap items-center justify-center gap-x-5 gap-y-3.5 sm:gap-x-10 sm:gap-y-5">
         {TECH_PROVIDERS.map(({ name, href, Logo }) => (
           <li key={name} className="flex items-center">
             <a
@@ -63,7 +63,7 @@ export function TechLogoStrip({ className }: TechLogoStripProps) {
               aria-label={name}
               className="inline-flex items-center rounded-[var(--r-sm)] px-1 py-0.5 text-[var(--muted)] opacity-80 transition-[color,opacity] duration-[var(--dur-2)] ease-[var(--ease)] hover:text-[var(--text)] hover:opacity-100 focus-visible:text-[var(--text)] focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--text)]"
             >
-              <Logo className="h-[24px] w-auto" />
+              <Logo className="h-[22px] w-auto sm:h-[24px]" />
             </a>
           </li>
         ))}
