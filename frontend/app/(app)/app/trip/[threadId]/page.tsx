@@ -56,6 +56,7 @@ export default function TripWorkspacePage() {
   useTripStream({
     threadId,
     status: state.status,
+    hasPayload: Boolean(state.payload),
     dispatch,
   });
 
@@ -192,7 +193,6 @@ export default function TripWorkspacePage() {
     if (!threadId || submittingReview) return;
     setSubmittingReview(true);
     setSubmittingAction("revise");
-    dispatch({ type: "REVISE_START", feedback });
 
     try {
       const res = await submitTripApprovalRequest({
@@ -203,6 +203,8 @@ export default function TripWorkspacePage() {
       if (res.payload) {
         dispatch({ type: "SET_FINAL_PAYLOAD", payload: res.payload });
         toast.success("Itinerary updated");
+      } else if (res.streaming) {
+        dispatch({ type: "REVISE_START", feedback });
       }
     } catch (err) {
       const msg =
@@ -461,7 +463,9 @@ export default function TripWorkspacePage() {
             />
           </div>
         </main>
-      ) : null}
+      ) : (
+        <ItinerarySkeleton />
+      )}
     </div>
   );
 }

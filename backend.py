@@ -1,6 +1,12 @@
 import os
+import sys
 import certifi
 from dotenv import load_dotenv
+
+if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 import re
 from typing import Any, TypedDict, Annotated
 import operator
@@ -77,7 +83,7 @@ specialist_llm = ChatGroq(
 revision_llm = ChatGroq(
     model=FAST_MODEL,
     api_key=GROQ_API_KEY,
-    max_tokens=1600,
+    max_tokens=3500,
     reasoning_effort="low",
 )
 day_selector_llm = ChatGroq(
@@ -134,7 +140,7 @@ AGENT_ORDER = [
         "itinerary_agent",
 ]
 DAY_PATTERN = re.compile(
-    r"(?ms)^###\s*Day\s+(\d+)\s*[-–—:]\s*.*?(?=^###\s*Day\s+\d+\s*[-–—:]|^(?:#{1,4}\s*(?:\*\*|__)?(?:Total\s+Estimated|Trip\s+Summary|Summary|Practical\s+Tips|Important\s+Travel|Estimated\s+Total|Budget\s+Summary|Overall\s+Cost|Travel\s+Tips|Final\s+Notes)|\*\*(?:Total\s+estimated\s+trip\s+cost|Practical\s+tips|Important\s+travel\s+considerations)\*\*)|\Z)"
+    r"(?ms)^#{2,4}\s*(?:\*\*|__)?Day\s+(\d+)(?:\*\*|__)?\s*[-–—‑‐−:]\s*.*?(?=^#{2,4}\s*(?:\*\*|__)?Day\s+\d+(?:\*\*|__)?\s*[-–—‑‐−:]|^(?:#{1,4}\s*(?:\*\*|__)?(?:Total\s+Estimated|Trip\s+Summary|Summary|Practical\s+Tips|Important\s+Travel|Estimated\s+Total|Budget\s+Summary|Overall\s+Cost|Travel\s+Tips|Final\s+Notes)|\*\*(?:Total\s+estimated\s+trip\s+cost|Practical\s+tips|Important\s+travel\s+considerations)\*\*)|\Z)"
 )
 
 
@@ -295,15 +301,13 @@ User request:
                         supervisor_prompt,
                 )
                 parsed = _json_from_llm(supervisor_raw)
-                requested_agents = parsed.get("selected_agents", [])
+                requested_agents = set(parsed.get("selected_agents", []) or [])
+                requested_agents.add("itinerary_agent")
+                requested_agents.add("weather_agent")
                 selected_agents = [
                         name for name in AGENT_ORDER
                         if name in requested_agents and name in KNOWN_AGENTS
                 ]
-
-                # The itinerary agent integrates whichever specialist results were selected.*
-                if "itinerary_agent" not in selected_agents:
-                        selected_agents.append("itinerary_agent")
 
                 constraints = _empty_constraints()
                 parsed_constraints = parsed.get("trip_constraints", {})
@@ -540,24 +544,53 @@ def flight_agent(state: TravelState):
 
 # hotel agent
 def hotel_agent(state: TravelState):
-        query = f"""
+        constraints = state.get("trip_constraints", {}) or {}
+        destination = str(constraints.get("destination", "")).strip()
+        travel_style = str(constraints.get("travel_style", "")).strip()
+        budget = str(constraints.get("budget", "")).strip()
+
+        if destination:
+                search_query = f"Best hotels to stay in {destination}"
+                if travel_style:
+                        search_query += f" for {travel_style} travelers"
+                if budget:
+                        search_query += f" within {budget} budget"
+                search_query += " with approximate nightly price, rating, neighborhood, and amenities"
+        else:
+                search_query = f"Best hotels and neighborhood stays for: {state['user_query']}"
+
+        try:
+                raw_hotels = asyncio.run(
+                        tavily_mcp_search(search_query)
+                )
+                hotel_context = _limit_context(raw_hotels, 4000)
+                prompt = f"""
 Find useful hotel options for this trip:
 {state["user_query"]}
-Return information relevant to:
-- hotel name
-- location
-- approximate price
-- rating/review information if available
-- important amenities
-- suitability for the user's travel style
-- source information
 
-Do not return unrelated hotels or general travel articles.
+Destination: {destination or "See user query"}
+Search findings:
+{hotel_context}
+
+Return a clean Markdown summary covering:
+- Hotel name & neighborhood
+- Approximate nightly price range (clearly marked as approximate)
+- Rating / guest review highlights if available
+- Important amenities & suitability for the traveler's style
+- Source links if available
+
+Do not return unrelated hotels from the origin city or general filler articles.
 """
-        try:
-                hotel_results = asyncio.run(
-                        tavily_mcp_search(query)
-                )
+                response = specialist_llm.invoke([
+                        SystemMessage(
+                                content=(
+                                        "You are a travel accommodation specialist. "
+                                        "Summarize only relevant hotels in the destination city in clean Markdown."
+                                )
+                        ),
+                        HumanMessage(content=prompt),
+                ])
+                hotel_results = str(response.content or "").strip() or _limit_context(raw_hotels, 3500)
 
         except Exception as exc:
                 print(
@@ -573,7 +606,7 @@ Do not return unrelated hotels or general travel articles.
                         "label it as non-live advice."
                 )
         return {
-                "hotel_results": hotel_results,
+                "hotel_results": str(hotel_results),
                 "messages": [
                         AIMessage(
                                 content="Hotel information processed."
@@ -585,6 +618,61 @@ Do not return unrelated hotels or general travel articles.
         }
 
 
+def _parse_maybe_json(data: Any) -> Any:
+        if isinstance(data, str):
+                text = data.strip()
+                if text.startswith("{") or text.startswith("["):
+                        try:
+                                return json.loads(text)
+                        except Exception:
+                                return data
+        return data
+
+
+def _format_weather_markdown(city: str, weather_data: Any, forecast_data: Any) -> str:
+        cur = _parse_maybe_json(weather_data)
+        fc = _parse_maybe_json(forecast_data)
+
+        lines: list[str] = []
+        if isinstance(cur, dict) and ("temperature_c" in cur or "condition" in cur):
+                resolved_city = cur.get("city") or city
+                temp = cur.get("temperature_c")
+                feels = cur.get("feels_like_c")
+                humidity = cur.get("humidity")
+                cond = str(cur.get("condition") or "").capitalize()
+                wind = cur.get("wind_speed")
+                lines.append(f"### Current Weather in {resolved_city}")
+                if cond:
+                        lines.append(f"- **Condition:** {cond}")
+                if temp is not None:
+                        feels_str = f" *(feels like {feels}°C)*" if feels is not None else ""
+                        lines.append(f"- **Temperature:** {temp}°C{feels_str}")
+                if humidity is not None:
+                        lines.append(f"- **Humidity:** {humidity}%")
+                if wind is not None:
+                        lines.append(f"- **Wind Speed:** {wind} m/s")
+        else:
+                lines.append(f"### Current Weather in {city}")
+                lines.append(str(weather_data).strip())
+
+        if isinstance(fc, dict) and isinstance(fc.get("forecast"), list) and fc["forecast"]:
+                lines.append("\n### Upcoming Forecast (3-Hour Intervals)")
+                lines.append("| Date & Time | Temp (°C) | Condition |")
+                lines.append("|---|---|---|")
+                for slot in fc["forecast"]:
+                        if not isinstance(slot, dict):
+                                continue
+                        dt = slot.get("datetime", "")
+                        t_c = slot.get("temperature_c", "")
+                        c_desc = str(slot.get("condition", "")).capitalize()
+                        lines.append(f"| {dt} | {t_c}°C | {c_desc} |")
+        elif forecast_data:
+                lines.append("\n### Forecast")
+                lines.append(str(forecast_data).strip())
+
+        return "\n".join(lines).strip()
+
+
 # weather agent
 def weather_agent(state: TravelState):
         print("\nINSIDE WEATHER AGENT\n")
@@ -594,29 +682,22 @@ def weather_agent(state: TravelState):
                 .strip()
         )
         if not city:
-
                 city = extract_destination(state["user_query"])
 
+        clean_city = re.sub(r"\s*\(.*?\)\s*", "", city).split(",")[0].strip() or city
+
         try:
-
                 weather_data = asyncio.run(
-
-                        weather_mcp_search(city)
-
+                        weather_mcp_search(clean_city)
                 )
-
                 forecast_data = asyncio.run(
-
-                        forecast_mcp_search(city)
-
+                        forecast_mcp_search(clean_city)
                 )
-
-                weather_results = f"""
-Current Weather:
-{weather_data}
-Forecast:
-{forecast_data}
-"""
+                weather_results = _format_weather_markdown(
+                        clean_city,
+                        weather_data,
+                        forecast_data,
+                )
         except Exception as exc:
                 print(
                         f"WEATHER AGENT MCP ERROR: "
@@ -724,7 +805,7 @@ def _merge_revised_days(
     original_itinerary: str,
     revised_sections: str,
 ) -> str:
-    """Replace only revised Day sections; keep all other content unchanged."""
+    """Replace revised Day sections and append any newly added Day sections."""
 
     replacements = _split_days(revised_sections)
 
@@ -732,8 +813,10 @@ def _merge_revised_days(
         return original_itinerary
 
     result = original_itinerary
+    original_Matches = list(DAY_PATTERN.finditer(original_itinerary))
+    existing_day_nums = {m.group(1) for m in original_Matches}
 
-    for match in reversed(list(DAY_PATTERN.finditer(original_itinerary))):
+    for match in reversed(original_Matches):
         day_number = match.group(1)
 
         if day_number in replacements:
@@ -744,7 +827,56 @@ def _merge_revised_days(
                 + result[match.end():]
             )
 
+    new_day_nums = sorted(
+        [d for d in replacements.keys() if d not in existing_day_nums],
+        key=lambda x: int(x) if x.isdigit() else 999,
+    )
+    if new_day_nums:
+        updated_matches = list(DAY_PATTERN.finditer(result))
+        new_block = "\n\n".join(replacements[d] for d in new_day_nums)
+        if updated_matches:
+            last_end = updated_matches[-1].end()
+            result = (
+                result[:last_end].rstrip()
+                + "\n\n"
+                + new_block
+                + "\n\n"
+                + result[last_end:].lstrip()
+            )
+        else:
+            result = result.rstrip() + "\n\n" + new_block
+
     return result.strip()
+
+
+def _detect_requested_duration(feedback: str, current_day_count: int) -> int | None:
+    """Detect if the user's revision feedback requests adding/removing days or a new total duration."""
+    duration_match = re.search(
+        r"\b(\d+)\s*(?:[-–—‑]\s*)?(?:day|days)\b",
+        feedback,
+        flags=re.IGNORECASE,
+    )
+    if duration_match:
+        # Ignore references like "Day 2" (which has "Day" before the number, not after)
+        requested = int(duration_match.group(1))
+        if 1 <= requested <= MAX_TRIP_DAYS and requested != current_day_count:
+            return requested
+
+    if re.search(
+        r"\b(?:add|include|plus|extend\s+by)\s+(?:another|one\s+more|an\s+extra|1\s+more|a|1|one)\s+day\b",
+        feedback,
+        flags=re.IGNORECASE,
+    ):
+        return min(MAX_TRIP_DAYS, max(1, current_day_count) + 1)
+
+    if re.search(
+        r"\b(?:remove|drop|cut|shorten\s+by)\s+(?:a|1|one|the\s+last)\s+day\b",
+        feedback,
+        flags=re.IGNORECASE,
+    ) and current_day_count > 1:
+        return current_day_count - 1
+
+    return None
 
 
 def _limit_context(text: Any, max_chars: int) -> str:
@@ -855,9 +987,70 @@ def itinerary_agent(state: TravelState):
     feedback = state.get("human_feedback", "").strip()
     existing_itinerary = state.get("itinerary", "").strip()
     day_sections = _split_days(existing_itinerary) if existing_itinerary else {}
+    constraints = dict(state.get("trip_constraints") or _empty_constraints())
+    selected_agents = list(state.get("selected_agents") or [])
+    weather_results = str(state.get("weather_results") or "").strip()
 
-    # REVISION MODE
-    if feedback and day_sections:
+    if not weather_results and constraints.get("destination"):
+        try:
+            w_out = weather_agent(state)
+            weather_results = str(w_out.get("weather_results") or "").strip()
+            if "weather_agent" not in selected_agents:
+                selected_agents.append("weather_agent")
+        except Exception as exc:
+            print(f"Weather backfill skipped: {exc}", flush=True)
+
+    requested_days = (
+        _detect_requested_duration(feedback, len(day_sections))
+        if feedback and day_sections
+        else None
+    )
+
+    # REVISION MODE: Duration change (adding/removing days)
+    if feedback and day_sections and requested_days is not None:
+        constraints["duration"] = f"{requested_days} days"
+        duration_revision_prompt = f"""
+Update this travel itinerary to be EXACTLY {requested_days} days and apply the user's feedback.
+
+USER FEEDBACK:
+{feedback}
+
+CURRENT ITINERARY:
+{_limit_context(existing_itinerary, 5500)}
+
+TRIP CONSTRAINTS:
+{json.dumps(constraints, ensure_ascii=False, separators=(",", ":"))}
+
+RULES:
+- The revised itinerary MUST have EXACTLY {requested_days} days (### Day 1 through ### Day {requested_days}).
+- Preserve existing well-planned activities where appropriate, move departure/airport transfer to Day {requested_days}, and add complete activities for any new day(s).
+- Explicitly incorporate the user's feedback (e.g., specific devotional/religious places, sightseeing, or pacing changes).
+- Use ASCII hyphens (-) or en-dashes (–) in headings: `### Day N – [Title]`.
+- Keep the summary/practical tips section after the final day.
+
+FORMAT FOR EACH DAY:
+### Day N – [Title]
+
+| Time | Activity | Approx. Cost (₹) |
+|---|---|---:|
+| ... | ... | ... |
+
+Day N total: ≈ ₹X
+"""
+        response = itinerary_llm.invoke([
+            SystemMessage(
+                content=(
+                    "You are an expert travel itinerary revision specialist. "
+                    f"Produce the complete updated {requested_days}-day itinerary in clean Markdown."
+                )
+            ),
+            HumanMessage(content=duration_revision_prompt),
+        ])
+        revised_full = str(response.content).strip()
+        complete_itinerary = revised_full if _split_days(revised_full) else _merge_revised_days(existing_itinerary, revised_full)
+
+    # REVISION MODE: Same duration, modify affected day(s)
+    elif feedback and day_sections:
         affected_days = _select_affected_days(feedback, day_sections)
 
         affected_content = "\n\n".join(
@@ -875,7 +1068,7 @@ AFFECTED DAY(S):
 
 REQUIREMENTS:
 - The user's feedback is a REQUIRED change.
-- Modify only the affected day(s).
+- Modify only the affected day(s): {", ".join(f"Day {d}" for d in affected_days)}.
 - Preserve useful existing activities unless the feedback requires a change.
 - Add the requested places or activities explicitly.
 - If devotional/religious places are requested, include specific suitable
@@ -885,8 +1078,8 @@ REQUIREMENTS:
 - Update affected costs.
 - Keep each replacement day complete.
 - Do not modify unrelated days.
-- Do not generate any other days.
 - Return ONLY the complete replacement Day section(s).
+- Use exact heading format: `### Day N – [Title]`
 
 FORMAT:
 ### Day N – [Title]
@@ -903,8 +1096,7 @@ Day N total: ≈ ₹X
                 content=(
                     "You are a travel itinerary revision specialist. "
                     "Apply the user's feedback concretely. "
-                    "Return only the complete replacement Day section(s). "
-                    "Never regenerate the complete itinerary."
+                    "Return only the complete replacement Day section(s) using `### Day N – Title` headings."
                 )
             ),
             HumanMessage(content=revision_prompt),
@@ -918,8 +1110,6 @@ Day N total: ≈ ₹X
         )
     # INITIAL DRAFT MODE
     else:
-        constraints = state.get("trip_constraints", {})
-
         prompt = f"""
 Create a COMPLETE travel itinerary.
 
@@ -940,7 +1130,7 @@ HOTELS:
 {_limit_context(state.get("hotel_results", ""), 3500)}
 
 WEATHER:
-{_limit_context(state.get("weather_results", ""), 1800)}
+{_limit_context(weather_results, 1800)}
 
 BUDGET:
 {_limit_context(state.get("budget_results", ""), 2200)}
@@ -996,16 +1186,19 @@ Create the complete draft for human review.
     )
     print("ITINERARY AGENT FINISHED - RETURNING TO HITL", flush=True)
     return {
-    "itinerary": complete_itinerary,
-    "approval_request": approval_request,
-    "approved": False,
-    "messages": [
-        AIMessage(
-            content="Travel itinerary draft created for human review."
-        )
-    ],
-    "llm_calls": state.get("llm_calls", 0) + 1,
-}
+        "itinerary": complete_itinerary,
+        "trip_constraints": constraints,
+        "weather_results": weather_results,
+        "selected_agents": selected_agents,
+        "approval_request": approval_request,
+        "approved": False,
+        "messages": [
+            AIMessage(
+                content="Travel itinerary draft created for human review."
+            )
+        ],
+        "llm_calls": state.get("llm_calls", 0) + 1,
+    }
 
 
 def human_approval_agent(state: TravelState):
@@ -1302,6 +1495,76 @@ def _interrupt_payload(result: dict[str, Any]) -> dict[str, Any] | None:
 
 
 
+def _format_search_results_markdown(data: dict[str, Any]) -> str:
+        results = data.get("results")
+        if not isinstance(results, list) or not results:
+                return json.dumps(data, ensure_ascii=False, indent=2)
+        lines: list[str] = ["### Recommended Stays & Sources\n"]
+        for item in results:
+                if not isinstance(item, dict):
+                        continue
+                title = str(item.get("title") or "Hotel option").strip()
+                url = str(item.get("url") or "").strip()
+                content = str(item.get("content") or "").strip()
+                if url:
+                        lines.append(f"- **[{title}]({url})**")
+                else:
+                        lines.append(f"- **{title}**")
+                if content:
+                        snippet = content[:500].strip()
+                        lines.append(f"  {snippet}")
+        return "\n\n".join(lines).strip()
+
+
+def _coerce_text(value: Any) -> str:
+        if value is None:
+                return ""
+        if isinstance(value, list):
+                parts: list[str] = []
+                for item in value:
+                        if isinstance(item, dict) and "text" in item:
+                                parts.append(_coerce_text(item["text"]))
+                        else:
+                                parts.append(_coerce_text(item))
+                return "\n\n".join(p for p in parts if p).strip()
+        if isinstance(value, dict):
+                if "results" in value and isinstance(value.get("results"), list):
+                        return _format_search_results_markdown(value)
+                if "text" in value and len(value) <= 2:
+                        return _coerce_text(value["text"])
+                return json.dumps(value, ensure_ascii=False, indent=2)
+        text = str(value).strip()
+        if text.startswith("{") and '"results"' in text:
+                try:
+                        parsed = json.loads(text)
+                        if isinstance(parsed, dict) and isinstance(parsed.get("results"), list):
+                                return _format_search_results_markdown(parsed)
+                except Exception:
+                        pass
+        return text
+
+
+def _normalize_constraints(raw: Any) -> dict[str, Any]:
+        base = _empty_constraints()
+        if not isinstance(raw, dict):
+                return base
+        prefs = raw.get("special_preferences")
+        if isinstance(prefs, list):
+                norm_prefs = [str(p).strip() for p in prefs if p is not None and str(p).strip()]
+        elif isinstance(prefs, str) and prefs.strip():
+                norm_prefs = [prefs.strip()]
+        else:
+                norm_prefs = []
+        return {
+                "destination": _coerce_text(raw.get("destination", "")),
+                "origin": _coerce_text(raw.get("origin", "")),
+                "duration": _coerce_text(raw.get("duration", "")),
+                "budget": _coerce_text(raw.get("budget", "")),
+                "travel_style": _coerce_text(raw.get("travel_style", "")),
+                "special_preferences": norm_prefs,
+        }
+
+
 def _serialize_result(
 
         result: dict[str, Any],
@@ -1312,9 +1575,9 @@ def _serialize_result(
 
         messages = result.get("messages", [])
 
-        last_message = messages[-1].content if messages else ""
+        last_message = _coerce_text(messages[-1].content) if messages else ""
 
-        answer = result.get("final_response") or last_message
+        answer = _coerce_text(result.get("final_response")) or last_message
 
         interrupt_payload = _interrupt_payload(result)
 
@@ -1322,23 +1585,21 @@ def _serialize_result(
 
         if interrupt_payload:
 
-                answer = interrupt_payload.get("draft_itinerary") or result.get(
-
-                        "itinerary", ""
-
+                answer = _coerce_text(interrupt_payload.get("draft_itinerary")) or _coerce_text(
+                        result.get("itinerary", "")
                 )
 
 
 
         return {
 
-                "thread_id": thread_id,
+                "thread_id": str(thread_id),
 
                 "answer": answer,
 
                 "requires_approval": interrupt_payload is not None,
 
-                "approval_request": (
+                "approval_request": _coerce_text(
 
                         interrupt_payload.get("approval_request", "")
 
@@ -1348,15 +1609,15 @@ def _serialize_result(
 
                 ),
 
-                "flight_results": result.get("flight_results", ""),
+                "flight_results": _coerce_text(result.get("flight_results", "")),
 
-                "hotel_results": result.get("hotel_results", ""),
+                "hotel_results": _coerce_text(result.get("hotel_results", "")),
 
-                "weather_results": result.get("weather_results", ""),
+                "weather_results": _coerce_text(result.get("weather_results", "")),
 
-                "budget_results": result.get("budget_results", ""),
+                "budget_results": _coerce_text(result.get("budget_results", "")),
 
-                "itinerary": (
+                "itinerary": _coerce_text(
 
                         interrupt_payload.get("draft_itinerary", "")
 
@@ -1366,21 +1627,23 @@ def _serialize_result(
 
                 ),
 
-                "selected_agents": result.get("selected_agents", []),
+                "selected_agents": [
+                        str(a) for a in (result.get("selected_agents") or []) if a
+                ],
 
-                "trip_constraints": result.get("trip_constraints", {}),
+                "trip_constraints": _normalize_constraints(result.get("trip_constraints", {})),
 
-                "supervisor_reasoning": result.get("supervisor_reasoning", ""),
+                "supervisor_reasoning": _coerce_text(result.get("supervisor_reasoning", "")),
 
-                "guardrail_allowed": result.get("guardrail_allowed", True),
+                "guardrail_allowed": bool(result.get("guardrail_allowed", True)),
 
-                "guardrail_reason": result.get("guardrail_reason", ""),
+                "guardrail_reason": _coerce_text(result.get("guardrail_reason", "")),
 
-                "approved": result.get("approved"),
+                "approved": bool(result.get("approved")) if result.get("approved") is not None else False,
 
-                "human_feedback": result.get("human_feedback", ""),
+                "human_feedback": _coerce_text(result.get("human_feedback", "")),
 
-                "llm_calls": result.get("llm_calls", 0),
+                "llm_calls": int(result.get("llm_calls") or 0),
 
         }
 
@@ -1482,15 +1745,18 @@ def resume_travel_agent(
             config=config,
         )
 
-        print("RESUME RESULT KEYS:", list(result.keys()), flush=True)
-        print("RESUME INTERRUPT:", result.get("__interrupt__"), flush=True)
+    serialized = _serialize_result(result, thread_id)
+    with _SESSIONS_LOCK:
+        existing = _SESSIONS.get(thread_id)
+        if existing:
+            existing["payload"] = serialized
+            existing["trip_constraints"] = serialized.get("trip_constraints") or existing["trip_constraints"]
+            existing["status"] = (
+                "awaiting_approval" if serialized.get("requires_approval") else "approved"
+            )
+            existing["done"] = True
 
-        snapshot = travel_graph.get_state(config)
-
-    print("RESUME SNAPSHOT NEXT:", snapshot.next, flush=True)
-    print("RESUME SNAPSHOT TASKS:", snapshot.tasks, flush=True)
-
-    return _serialize_result(result, thread_id)
+    return serialized
 
 
 # ---------------------------------------------------------------------------
@@ -1738,12 +2004,6 @@ def _execute_initial_stream_worker(thread_id: str, user_input: str) -> None:
                 session["status"] = "blocked"
             elif serialized.get("requires_approval"):
                 session["status"] = "awaiting_approval"
-                session["events"].append(
-                    {
-                        "type": "interrupt",
-                        "requires_approval": True,
-                    }
-                )
             else:
                 session["status"] = "approved"
 
@@ -1810,16 +2070,10 @@ def _execute_revision_stream_worker(thread_id: str, feedback: str) -> None:
             for trace in session["traces"]:
                 trace["active"] = False
             session["payload"] = serialized
+            session["trip_constraints"] = serialized.get("trip_constraints") or session["trip_constraints"]
             session["status"] = (
                 "awaiting_approval" if serialized.get("requires_approval") else "approved"
             )
-            if serialized.get("requires_approval"):
-                session["events"].append(
-                    {
-                        "type": "interrupt",
-                        "requires_approval": True,
-                    }
-                )
             session["events"].append(
                 {
                     "type": "final",
@@ -1997,6 +2251,22 @@ def get_trip_snapshot(thread_id: str) -> dict[str, Any] | None:
             break
 
     serialized = _serialize_result(values, thread_id)
+    dest = (serialized.get("trip_constraints") or {}).get("destination", "").strip()
+    if (
+        serialized.get("guardrail_allowed", True)
+        and dest
+        and not (serialized.get("weather_results") or "").strip()
+    ):
+        try:
+            w_out = weather_agent(values)
+            w_text = _coerce_text(w_out.get("weather_results", ""))
+            if w_text:
+                serialized["weather_results"] = w_text
+                if "weather_agent" not in serialized["selected_agents"]:
+                    serialized["selected_agents"].append("weather_agent")
+        except Exception as exc:
+            print(f"Snapshot weather backfill skipped: {exc}", flush=True)
+
     if not serialized.get("guardrail_allowed", True):
         status = "blocked"
     elif has_interrupt or serialized.get("requires_approval"):
@@ -2014,7 +2284,7 @@ def get_trip_snapshot(thread_id: str) -> dict[str, Any] | None:
         "itinerary_agent": "done" if status != "blocked" else "skipped",
     }
 
-    return {
+    snapshot_data = {
         "thread_id": thread_id,
         "status": status,
         "user_query": str(values.get("user_query", "")),
@@ -2025,6 +2295,15 @@ def get_trip_snapshot(thread_id: str) -> dict[str, Any] | None:
         "steps": steps,
         "traces": [],
     }
+    with _SESSIONS_LOCK:
+        if thread_id not in _SESSIONS:
+            _SESSIONS[thread_id] = {
+                **snapshot_data,
+                "started_at": time.monotonic(),
+                "events": [{"type": "final", "payload": serialized}],
+                "done": True,
+            }
+    return snapshot_data
 
 
 async def subscribe_trip_events(thread_id: str):
@@ -2044,8 +2323,6 @@ async def subscribe_trip_events(thread_id: str):
         if session is None:
             snapshot = get_trip_snapshot(thread_id)
             if snapshot and snapshot.get("payload"):
-                if snapshot.get("status") == "awaiting_approval":
-                    yield f"data: {json.dumps({'type': 'interrupt', 'requires_approval': True})}\n\n"
                 yield f"data: {json.dumps({'type': 'final', 'payload': snapshot['payload']}, ensure_ascii=False)}\n\n"
             else:
                 yield f"data: {json.dumps({'type': 'error', 'message': 'Trip session not found.'})}\n\n"

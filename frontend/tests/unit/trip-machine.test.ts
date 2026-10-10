@@ -80,4 +80,30 @@ describe("tripReducer", () => {
     expect(finished.status).toBe("approved");
     expect(finished.steps.itinerary_agent.status).toBe("done");
   });
+
+  it("coerces MCP content block arrays in specialist outputs into markdown strings", () => {
+    const payload = TravelPayloadSchema.parse({
+      thread_id: "thread-5",
+      hotel_results: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            query: "Dubai hotels",
+            results: [
+              {
+                title: "Downtown Dubai Hotel",
+                url: "https://example.com/dubai-hotel",
+                content: "Great central location near Burj Khalifa.",
+              },
+            ],
+          }),
+        },
+      ],
+      requires_approval: true,
+    });
+
+    expect(typeof payload.hotel_results).toBe("string");
+    expect(payload.hotel_results).toContain("Downtown Dubai Hotel");
+    expect(payload.hotel_results).toContain("https://example.com/dubai-hotel");
+  });
 });

@@ -8,15 +8,20 @@ import type { TripAction } from "@/lib/trip-machine";
 export interface UseTripStreamOptions {
   threadId: string | null;
   status: TripStatus;
+  hasPayload?: boolean;
   dispatch: React.Dispatch<TripAction>;
 }
 
 export function useTripStream({
   threadId,
   status,
+  hasPayload = false,
   dispatch,
 }: UseTripStreamOptions): void {
-  const isActive = status === "streaming" || status === "revising";
+  const isActive =
+    status === "streaming" ||
+    status === "revising" ||
+    (status === "awaiting_approval" && !hasPayload);
 
   React.useEffect(() => {
     if (!isActive) return;
@@ -53,35 +58,44 @@ export function useTripStream({
       }
     };
 
+    const hydrateOnce = async (): Promise<boolean> => {
+      if (closed) return false;
+      try {
+        const snapshot = await fetchTripSnapshot(threadId);
+        if (closed) return false;
+        dispatch({
+          type: "HYDRATE_SNAPSHOT",
+          threadId: snapshot.thread_id,
+          status: snapshot.status,
+          userQuery: snapshot.user_query,
+          constraints: snapshot.trip_constraints,
+          payload: snapshot.payload,
+          steps: snapshot.steps,
+          traces: snapshot.traces,
+          elapsedSeconds: snapshot.elapsed,
+          error: snapshot.error,
+        });
+        if (
+          snapshot.status !== "streaming" &&
+          snapshot.status !== "revising" &&
+          snapshot.status !== "submitting" &&
+          (snapshot.payload || snapshot.status === "blocked" || snapshot.status === "error")
+        ) {
+          stopAll();
+          return true;
+        }
+      } catch {
+        // Ignore transient snapshot error while streaming
+      }
+      return false;
+    };
+
     const startPollingFallback = () => {
       if (closed || pollTimer !== null) return;
-      pollTimer = window.setInterval(async () => {
-        if (closed) return;
-        try {
-          const snapshot = await fetchTripSnapshot(threadId);
-          dispatch({
-            type: "HYDRATE_SNAPSHOT",
-            threadId: snapshot.thread_id,
-            status: snapshot.status,
-            userQuery: snapshot.user_query,
-            constraints: snapshot.trip_constraints,
-            payload: snapshot.payload,
-            steps: snapshot.steps,
-            traces: snapshot.traces,
-            elapsedSeconds: snapshot.elapsed,
-            error: snapshot.error,
-          });
-          if (
-            snapshot.status !== "streaming" &&
-            snapshot.status !== "revising" &&
-            snapshot.status !== "submitting"
-          ) {
-            stopAll();
-          }
-        } catch {
-          // Keep polling quietly until complete or max retries
-        }
-      }, 2200);
+      void hydrateOnce();
+      pollTimer = window.setInterval(() => {
+        void hydrateOnce();
+      }, 2000);
     };
 
     const connectSse = () => {
@@ -103,6 +117,16 @@ export function useTripStream({
             const event = parsed.data;
             dispatch({ type: "STREAM_EVENT", event });
 
+            if (event.type === "interrupt") {
+              // Ensure payload is hydrated even if final event was omitted or delayed
+              window.setTimeout(() => {
+                if (!closed) {
+                  void hydrateOnce();
+                }
+              }, 400);
+              return;
+            }
+
             if (
               event.type === "final" ||
               event.type === "error" ||
@@ -119,13 +143,16 @@ export function useTripStream({
           if (closed) return;
           es.close();
           eventSource = null;
-          retryAttempt += 1;
-          if (retryAttempt <= 2) {
-            const delay = Math.min(1000 * 2 ** (retryAttempt - 1), 4000);
-            reconnectTimeout = window.setTimeout(connectSse, delay);
-          } else {
-            startPollingFallback();
-          }
+          void hydrateOnce().then((finished) => {
+            if (finished || closed) return;
+            retryAttempt += 1;
+            if (retryAttempt <= 2) {
+              const delay = Math.min(1000 * 2 ** (retryAttempt - 1), 3000);
+              reconnectTimeout = window.setTimeout(connectSse, delay);
+            } else {
+              startPollingFallback();
+            }
+          });
         };
       } catch {
         startPollingFallback();
