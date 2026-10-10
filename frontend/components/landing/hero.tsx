@@ -1,10 +1,11 @@
 import * as React from "react";
 import { Badge } from "@/components/ui/badge";
 import { PromptPill } from "@/components/landing/prompt-pill";
+import { TechLogoStrip } from "@/components/landing/tech-logo-strip";
 
 export function Hero() {
   return (
-    <section className="mx-auto flex w-full max-w-[var(--container)] flex-col items-center px-4 pt-14 pb-12 text-center sm:px-6 sm:pt-20 sm:pb-16">
+    <section className="mx-auto flex w-full max-w-[var(--container)] flex-col items-center px-4 pt-14 pb-10 text-center sm:px-6 sm:pt-20 sm:pb-14">
       <Badge variant="live" dot className="mb-7 py-1.5 px-4">
         Human-in-the-loop review
       </Badge>
@@ -22,9 +23,7 @@ export function Hero() {
         <PromptPill />
       </div>
 
-      <p className="mt-4 text-xs text-[var(--muted)]">
-        Powered by LangGraph · Groq · Tavily · AviationStack · OpenWeather
-      </p>
+      <TechLogoStrip />
     </section>
   );
 }

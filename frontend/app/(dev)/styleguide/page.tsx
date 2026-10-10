@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { AgentNode } from "@/components/agents/agent-node";
 import { TracePanel } from "@/components/agents/trace-panel";
 import { ItineraryView } from "@/components/review/itinerary-view";
+import { TechLogoStrip } from "@/components/landing/tech-logo-strip";
 import { parseItinerary } from "@/lib/parse-itinerary";
 import type { TraceLine } from "@/lib/schemas";
 
@@ -165,6 +166,17 @@ export default function StyleguidePage() {
         <section className="space-y-4">
           <p className="label">ITINERARY VIEW</p>
           <ItineraryView parsed={parsed} />
+        </section>
+
+        <section className="space-y-6">
+          <p className="label">TECH LOGO STRIP (DESKTOP &amp; 360PX MOBILE)</p>
+          <div className="rounded-[var(--r-lg)] border border-[var(--border)] bg-[var(--surface)] p-6">
+            <TechLogoStrip className="mt-0" />
+          </div>
+          <div className="mx-auto w-full max-w-[360px] rounded-[var(--r-lg)] border border-[var(--border)] bg-[var(--surface)] p-5">
+            <p className="label mb-3 text-center">360px mobile preview</p>
+            <TechLogoStrip className="mt-0" />
+          </div>
         </section>
       </div>
     </div>
