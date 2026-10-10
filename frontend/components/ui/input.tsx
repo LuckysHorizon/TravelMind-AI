@@ -50,9 +50,9 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
             error ? errorId : helperText ? helperId : undefined
           }
           className={cn(
-            "flex min-h-[44px] w-full min-w-0 rounded-[var(--r-sm)] border border-[var(--border)] bg-[var(--surface)] px-3.5 py-2.5 text-[15px] text-[var(--text)] placeholder:text-[var(--muted)] transition-colors duration-[var(--dur-1)] ease-[var(--ease)] focus-visible:border-[var(--border-strong)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--text)] disabled:cursor-not-allowed disabled:opacity-50",
+            "flex min-h-[44px] w-full min-w-0 rounded-[var(--r-sm)] border border-[var(--border)] bg-[var(--surface)] px-3.5 py-2.5 text-[15px] text-[var(--text)] placeholder:text-[var(--muted)] outline-none transition-colors duration-[var(--dur-1)] ease-[var(--ease)] focus:border-[var(--border-strong)] focus:outline-none focus-visible:border-[var(--border-strong)] focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
             error &&
-              "border-[var(--danger-fg)] focus-visible:outline-[var(--danger-fg)]",
+              "border-[var(--danger-fg)] focus:border-[var(--danger-fg)] focus-visible:border-[var(--danger-fg)]",
             className
           )}
           {...props}

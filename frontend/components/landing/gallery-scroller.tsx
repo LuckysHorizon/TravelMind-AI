@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
 import { GalleryCard } from "@/components/landing/GalleryCard";
 import { GALLERY_CARDS } from "@/components/landing/gallery-cards";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
@@ -57,9 +56,7 @@ export function GalleryScroller({ className }: GalleryScrollerProps) {
   }, []);
 
   const {
-    userPaused,
     isPaused,
-    toggleUserPause,
     notifyInteractionStart,
     notifyInteractionEnd,
     notifyTransientInteraction,
@@ -68,7 +65,7 @@ export function GalleryScroller({ className }: GalleryScrollerProps) {
     scrollerRef,
     sectionRef,
     disabled: reducedMotion,
-    speedPxPerFrame: 0.4,
+    speedPxPerFrame: 0.6,
     resumeDelayMs: 2000,
     getLoopWidth,
   });
@@ -90,8 +87,15 @@ export function GalleryScroller({ className }: GalleryScrollerProps) {
   }, [updateScrollBounds, reducedMotion]);
 
   const handleScroll = React.useCallback(() => {
+    const el = scrollerRef.current;
+    if (el && !reducedMotion) {
+      const loopWidth = getLoopWidth();
+      if (loopWidth > 0 && el.scrollLeft >= loopWidth) {
+        el.scrollLeft -= loopWidth;
+      }
+    }
     updateScrollBounds();
-  }, [updateScrollBounds]);
+  }, [getLoopWidth, reducedMotion, updateScrollBounds]);
 
   const handleWheel = React.useCallback<React.WheelEventHandler<HTMLDivElement>>(
     (event) => {
@@ -141,73 +145,16 @@ export function GalleryScroller({ className }: GalleryScrollerProps) {
     [getCardStep, notifyTransientInteraction, updateScrollBounds]
   );
 
-  const handlePrev = React.useCallback(() => {
-    const el = scrollerRef.current;
-    if (!el) return;
-    notifyTransientInteraction();
-    const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth);
-    const step = Math.max(getCardStep() * 2, Math.ceil(maxScroll / 5));
-    el.scrollLeft = Math.max(0, el.scrollLeft - step);
-    updateScrollBounds();
-  }, [getCardStep, notifyTransientInteraction, updateScrollBounds]);
-
-  const handleNext = React.useCallback(() => {
-    const el = scrollerRef.current;
-    if (!el) return;
-    notifyTransientInteraction();
-    const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth);
-    const step = Math.max(getCardStep() * 2, Math.ceil(maxScroll / 5));
-    el.scrollLeft = Math.min(maxScroll, el.scrollLeft + step);
-    updateScrollBounds();
-  }, [getCardStep, notifyTransientInteraction, updateScrollBounds]);
-
   return (
     <section
       ref={sectionRef}
       aria-label="Sample agent outputs"
       className={cn(
-        "mx-auto w-full max-w-[var(--container)] py-6 sm:py-10",
+        "mx-auto w-full max-w-[var(--container)] pt-6 pb-8 sm:pt-8 sm:pb-12",
         className
       )}
       {...interactionHandlers}
     >
-      <div className="mb-3 flex items-center justify-end gap-2 px-4 sm:px-6">
-        <button
-          type="button"
-          onClick={toggleUserPause}
-          aria-pressed={userPaused}
-          aria-label={userPaused ? "Play auto-scroll" : "Pause auto-scroll"}
-          title={userPaused ? "Play auto-scroll" : "Pause auto-scroll"}
-          className="inline-flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-[var(--r-pill)] border border-[var(--border)] bg-[var(--surface)] text-[var(--text-2)] transition-colors duration-[var(--dur-1)] ease-[var(--ease)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)] hover:text-[var(--text)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--text)] cursor-pointer"
-        >
-          {userPaused ? (
-            <Play className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-          ) : (
-            <Pause className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-          )}
-        </button>
-
-        <button
-          type="button"
-          onClick={handlePrev}
-          disabled={atStart}
-          aria-label="Previous cards"
-          className="hidden h-[44px] w-[44px] shrink-0 items-center justify-center rounded-[var(--r-pill)] border border-[var(--border)] bg-[var(--surface)] text-[var(--text-2)] transition-colors duration-[var(--dur-1)] ease-[var(--ease)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)] hover:text-[var(--text)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--text)] disabled:pointer-events-none disabled:opacity-40 cursor-pointer md:inline-flex"
-        >
-          <ChevronLeft className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-        </button>
-
-        <button
-          type="button"
-          onClick={handleNext}
-          disabled={atEnd}
-          aria-label="Next cards"
-          className="hidden h-[44px] w-[44px] shrink-0 items-center justify-center rounded-[var(--r-pill)] border border-[var(--border)] bg-[var(--surface)] text-[var(--text-2)] transition-colors duration-[var(--dur-1)] ease-[var(--ease)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-2)] hover:text-[var(--text)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--text)] disabled:pointer-events-none disabled:opacity-40 cursor-pointer md:inline-flex"
-        >
-          <ChevronRight className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-        </button>
-      </div>
-
       <div
         ref={scrollerRef}
         role="region"

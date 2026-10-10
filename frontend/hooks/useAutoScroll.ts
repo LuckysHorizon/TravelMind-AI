@@ -41,7 +41,7 @@ export function useAutoScroll({
   const [isHovered, setIsHovered] = React.useState(false);
   const [isFocused, setIsFocused] = React.useState(false);
   const [isInteracting, setIsInteracting] = React.useState(false);
-  const [isCoolingDown, setIsCoolingDown] = React.useState(!disabled);
+  const [isCoolingDown, setIsCoolingDown] = React.useState(false);
   const [isInView, setIsInView] = React.useState(true);
   const [isTabVisible, setIsTabVisible] = React.useState(true);
 
@@ -68,17 +68,10 @@ export function useAutoScroll({
   }, [clearResumeTimer, resumeDelayMs]);
 
   React.useEffect(() => {
-    if (disabled) {
-      return;
-    }
-    const initialTimer = setTimeout(() => {
-      setIsCoolingDown(false);
-    }, resumeDelayMs);
     return () => {
-      clearTimeout(initialTimer);
       clearResumeTimer();
     };
-  }, [disabled, resumeDelayMs, clearResumeTimer]);
+  }, [clearResumeTimer]);
 
   // Track document visibility
   React.useEffect(() => {

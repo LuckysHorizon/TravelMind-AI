@@ -46,7 +46,7 @@ export function PromptCard({
   return (
     <Card
       className={cn(
-        "mx-auto w-full max-w-[680px] p-5 shadow-[0_18px_50px_rgba(11,18,14,0.05)] sm:p-6",
+        "mx-auto w-full max-w-[680px] p-5 shadow-[0_18px_50px_rgba(11,18,14,0.05)] transition-colors duration-[var(--dur-1)] focus-within:border-[var(--border-strong)] sm:p-6",
         className
       )}
     >
@@ -66,7 +66,7 @@ export function PromptCard({
           aria-invalid={Boolean(error) || undefined}
           aria-describedby={error ? errorId : undefined}
           rows={3}
-          className="min-h-[96px] w-full resize-none bg-transparent text-lg leading-relaxed text-[var(--text)] placeholder:text-[var(--muted)] focus:outline-none disabled:opacity-50"
+          className="min-h-[96px] w-full resize-none border-0 bg-transparent text-lg leading-relaxed text-[var(--text)] placeholder:text-[var(--muted)] outline-none focus:outline-none focus-visible:outline-none disabled:opacity-50"
         />
 
         {error && (

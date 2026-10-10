@@ -74,9 +74,24 @@ test.beforeAll(() => {
 });
 
 test.describe("TravelMind AI — Responsive, Accessibility & Full Flow E2E", () => {
-  test("Landing page (desktop & mobile) renders dark theme by default, passes axe, and captures screenshots", async ({
+  test("Landing page (desktop & mobile) renders dark & light themes across 360/390/768/1440px, verifies network & console, passes axe, and captures screenshots", async ({
     page,
   }) => {
+    const consoleErrors: string[] = [];
+    const requestedUrls: string[] = [];
+
+    page.on("console", (msg) => {
+      if (msg.type() === "error") {
+        consoleErrors.push(msg.text());
+      }
+    });
+    page.on("pageerror", (err) => {
+      consoleErrors.push(err.message);
+    });
+    page.on("request", (req) => {
+      requestedUrls.push(req.url());
+    });
+
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/");
 
@@ -93,7 +108,7 @@ test.describe("TravelMind AI — Responsive, Accessibility & Full Flow E2E", () 
     );
     expect(bodyBg).toBe("rgb(11, 18, 14)");
 
-    // Verify TechLogoStrip ("Built on" + 5 provider links)
+    // Verify TechLogoStrip ("Built on" + 5 provider links with target="_blank" rel="noopener noreferrer")
     await expect(page.getByText("Built on", { exact: true })).toBeVisible();
     for (const provider of [
       "LangGraph",
@@ -102,66 +117,133 @@ test.describe("TravelMind AI — Responsive, Accessibility & Full Flow E2E", () 
       "AviationStack",
       "OpenWeather",
     ]) {
-      await expect(page.getByRole("link", { name: provider })).toBeVisible();
+      const link = page.getByRole("link", { name: provider });
+      await expect(link).toBeVisible();
+      await expect(link).toHaveAttribute("target", "_blank");
+      await expect(link).toHaveAttribute("rel", /noopener/);
     }
 
     // Verify all 6 agent cards have dark theme artwork applied
+    const agentSection = page.locator("#agents");
     const agentCards = page.locator("#agents .agent-card-bg");
     await expect(agentCards).toHaveCount(6);
+    await agentSection.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(200);
+
     const firstCardBgDark = await agentCards
       .first()
       .evaluate((el) => window.getComputedStyle(el).backgroundImage);
     expect(firstCardBgDark).toContain("01-supervisor-dark");
 
-    // Check no horizontal overflow on desktop
-    const overflowDesktop = await page.evaluate(
-      () => document.documentElement.scrollWidth > window.innerWidth
+    // Verify Network tab: only dark agent-card images loaded while in dark theme
+    const lightBgRequestsInDark = requestedUrls.filter((u) =>
+      /agent-card-backgrounds\/.*-light\.(png|webp)/.test(u)
     );
-    expect(overflowDesktop).toBe(false);
+    expect(lightBgRequestsInDark).toEqual([]);
+
+    await agentSection.screenshot({
+      path: path.join(AFTER_DIR, "agent-cards-dark.png"),
+    });
+
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(100);
 
     await page.screenshot({
       path: path.join(AFTER_DIR, "landing-desktop.png"),
       fullPage: true,
     });
-
-    const axeDesktop = await new AxeBuilder({ page })
-      .withTags(["wcag2a", "wcag2aa"])
-      .analyze();
-    const seriousViolations = axeDesktop.violations.filter(
-      (v) => v.impact === "critical" || v.impact === "serious"
-    );
-    expect(seriousViolations).toEqual([]);
-
-    // Tablet (768px) and mobile viewports (390px and 360px)
-    await page.setViewportSize({ width: 768, height: 1024 });
-    await page.waitForTimeout(150);
-    const overflow768 = await page.evaluate(
-      () => document.documentElement.scrollWidth > window.innerWidth
-    );
-    expect(overflow768).toBe(false);
-
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.waitForTimeout(200);
-
-    const overflowMobile = await page.evaluate(
-      () => document.documentElement.scrollWidth > window.innerWidth
-    );
-    expect(overflowMobile).toBe(false);
-
     await page.screenshot({
-      path: path.join(AFTER_DIR, "landing-mobile.png"),
+      path: path.join(AFTER_DIR, "landing-dark-desktop.png"),
       fullPage: true,
     });
 
-    await page.setViewportSize({ width: 360, height: 800 });
-    await page.waitForTimeout(150);
-    const overflow360 = await page.evaluate(
-      () => document.documentElement.scrollWidth > window.innerWidth
-    );
-    expect(overflow360).toBe(false);
+    const axeDarkDesktop = await new AxeBuilder({ page })
+      .withTags(["wcag2a", "wcag2aa"])
+      .analyze();
+    expect(
+      axeDarkDesktop.violations.filter(
+        (v) => v.impact === "critical" || v.impact === "serious"
+      )
+    ).toEqual([]);
+
+    // Check dark theme across 1440, 768, 390, 360px
+    for (const vp of [
+      { width: 1440, height: 900 },
+      { width: 768, height: 1024 },
+      { width: 390, height: 844 },
+      { width: 360, height: 800 },
+    ]) {
+      await page.setViewportSize(vp);
+      await page.waitForTimeout(100);
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth > window.innerWidth
+      );
+      expect(overflow).toBe(false);
+      if (vp.width === 390) {
+        await page.screenshot({
+          path: path.join(AFTER_DIR, "landing-mobile.png"),
+          fullPage: true,
+        });
+        await page.screenshot({
+          path: path.join(AFTER_DIR, "landing-dark-mobile.png"),
+          fullPage: true,
+        });
+      }
+    }
+
+    // Toggle to Light theme at 1440px and verify artwork, axe, and viewports
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.waitForTimeout(100);
+    await page
+      .getByRole("button", { name: /Click to switch theme/i })
+      .first()
+      .click();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+
+    const firstCardBgLight = await agentCards
+      .first()
+      .evaluate((el) => window.getComputedStyle(el).backgroundImage);
+    expect(firstCardBgLight).toContain("01-supervisor-light");
+
+    await agentSection.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(200);
+    await agentSection.screenshot({
+      path: path.join(AFTER_DIR, "agent-cards-light.png"),
+    });
+
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(100);
+    await page.screenshot({
+      path: path.join(AFTER_DIR, "landing-light-desktop.png"),
+      fullPage: true,
+    });
+
+    const axeLightDesktop = await new AxeBuilder({ page })
+      .withTags(["wcag2a", "wcag2aa"])
+      .analyze();
+    expect(
+      axeLightDesktop.violations.filter(
+        (v) => v.impact === "critical" || v.impact === "serious"
+      )
+    ).toEqual([]);
+
+    for (const vp of [
+      { width: 768, height: 1024 },
+      { width: 390, height: 844 },
+      { width: 360, height: 800 },
+    ]) {
+      await page.setViewportSize(vp);
+      await page.waitForTimeout(100);
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth > window.innerWidth
+      );
+      expect(overflow).toBe(false);
+    }
+
+    expect(consoleErrors).toEqual([]);
   });
 
-  test("GalleryScroller supports Next-to-end, disabled state, hover pause, ArrowRight, and reduced motion", async ({
+  test("GalleryScroller supports infinite auto-scroll, hover pause, keyboard navigation, and reduced motion", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -170,19 +252,20 @@ test.describe("TravelMind AI — Responsive, Accessibility & Full Flow E2E", () 
     const scroller = page.getByRole("region", {
       name: /Sample agent output cards/i,
     });
-    const prevBtn = page.getByRole("button", { name: /Previous cards/i });
-    const nextBtn = page.getByRole("button", { name: /Next cards/i });
-    const pauseBtn = page.getByRole("button", {
-      name: /Pause auto-scroll|Play auto-scroll/i,
-    });
 
     await expect(scroller).toBeVisible();
+    await expect(page.locator('[data-gallery-card="primary"]')).toHaveCount(8);
+    await expect(page.locator('[data-gallery-card="clone"]')).toHaveCount(8);
 
-    // Jump to start with Home to deterministically verify start disabled state
+    // Verify infinite auto-scroll advances scrollLeft automatically
+    const initialScroll = await scroller.evaluate((el) => el.scrollLeft);
+    await page.waitForTimeout(350);
+    const advancedScroll = await scroller.evaluate((el) => el.scrollLeft);
+    expect(advancedScroll).toBeGreaterThan(initialScroll);
+
+    // Jump to start with Home to deterministically verify start state
     await scroller.focus();
     await scroller.press("Home");
-    await expect(prevBtn).toBeDisabled();
-    await expect(nextBtn).toBeEnabled();
     await expect(scroller).toHaveAttribute("data-at-start", "true");
     await expect(scroller).toHaveAttribute("data-at-end", "false");
 
@@ -191,7 +274,6 @@ test.describe("TravelMind AI — Responsive, Accessibility & Full Flow E2E", () 
     const scrollAfterArrowRight = await scroller.evaluate((el) => el.scrollLeft);
     expect(scrollAfterArrowRight).toBeGreaterThan(0);
     await expect(scroller).toHaveAttribute("data-at-start", "false");
-    await expect(prevBtn).toBeEnabled();
 
     // Hover pause: hovering over the gallery keeps scrollLeft steady
     await scroller.hover();
@@ -199,19 +281,6 @@ test.describe("TravelMind AI — Responsive, Accessibility & Full Flow E2E", () 
     await page.waitForTimeout(300);
     const scrollAfterHoverWait = await scroller.evaluate((el) => el.scrollLeft);
     expect(scrollAfterHoverWait).toBe(scrollBeforeHoverWait);
-
-    // Next-to-end disables Next button and sets data-at-end="true"
-    for (let i = 0; i < 12; i++) {
-      if (await nextBtn.isDisabled()) break;
-      await nextBtn.click();
-    }
-    await expect(nextBtn).toBeDisabled();
-    await expect(scroller).toHaveAttribute("data-at-end", "true");
-
-    // Pause/Play toggle button updates aria-pressed
-    await expect(pauseBtn).toHaveAttribute("aria-pressed", "false");
-    await pauseBtn.click();
-    await expect(pauseBtn).toHaveAttribute("aria-pressed", "true");
 
     // Reduced motion disables clones and auto-scroll
     await page.emulateMedia({ reducedMotion: "reduce" });

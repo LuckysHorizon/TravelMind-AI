@@ -53,7 +53,7 @@ export function PromptPill({
         placeholder={placeholder}
         maxLength={1000}
         disabled={disabled}
-        className="min-h-[40px] min-w-0 flex-1 bg-transparent text-[15px] text-[var(--text)] placeholder:text-[var(--muted)] focus:outline-none disabled:opacity-50"
+        className="min-h-[40px] min-w-0 flex-1 border-0 bg-transparent text-[15px] text-[var(--text)] placeholder:text-[var(--muted)] outline-none focus:outline-none focus-visible:outline-none disabled:opacity-50"
       />
       <Button
         type="submit"
