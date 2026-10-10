@@ -105,6 +105,14 @@ test.describe("TravelMind AI — Responsive, Accessibility & Full Flow E2E", () 
       await expect(page.getByRole("link", { name: provider })).toBeVisible();
     }
 
+    // Verify all 6 agent cards have dark theme artwork applied
+    const agentCards = page.locator("#agents .agent-card-bg");
+    await expect(agentCards).toHaveCount(6);
+    const firstCardBgDark = await agentCards
+      .first()
+      .evaluate((el) => window.getComputedStyle(el).backgroundImage);
+    expect(firstCardBgDark).toContain("01-supervisor-dark");
+
     // Check no horizontal overflow on desktop
     const overflowDesktop = await page.evaluate(
       () => document.documentElement.scrollWidth > window.innerWidth
@@ -124,7 +132,14 @@ test.describe("TravelMind AI — Responsive, Accessibility & Full Flow E2E", () 
     );
     expect(seriousViolations).toEqual([]);
 
-    // Mobile viewport (390px and 360px)
+    // Tablet (768px) and mobile viewports (390px and 360px)
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.waitForTimeout(150);
+    const overflow768 = await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth
+    );
+    expect(overflow768).toBe(false);
+
     await page.setViewportSize({ width: 390, height: 844 });
     await page.waitForTimeout(200);
 

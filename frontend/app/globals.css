@@ -214,6 +214,48 @@ body {
   -webkit-mask-image: none;
 }
 
+.agent-card-bg {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background-color: var(--surface);
+  background-image: var(--bg-light);
+  background-repeat: no-repeat;
+  background-position: right 0px top 0px;
+  background-size: cover;
+  transition:
+    border-color var(--dur-2) var(--ease),
+    background-position var(--dur-2) var(--ease);
+}
+
+:root[data-theme="dark"] .agent-card-bg {
+  background-image: var(--bg-dark);
+}
+
+.agent-card-bg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    40deg,
+    var(--surface) 18%,
+    color-mix(in srgb, var(--surface) 82%, transparent) 42%,
+    transparent 58%
+  );
+}
+
+.agent-card-bg:hover {
+  border-color: var(--border-strong);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .agent-card-bg:hover {
+    background-position: right -4px top -3px;
+  }
+}
+
 @keyframes trace-blink {
   0%,
   49% {
