@@ -1,36 +1,42 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# TravelMind AI — Frontend
 
-## Getting Started
+Modern **Next.js 16 (App Router) + React 19 + TypeScript + Tailwind CSS v4** frontend for **TravelMind AI**.
 
-First, run the development server:
+For the complete architecture reference, design system tokens, component breakdown, and Vercel deployment instructions, see **[`Frontend.md`](./Frontend.md)**.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## Quick Start (Local Development)
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+1. Install dependencies:
+   ```bash
+   pnpm install
+   ```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+2. Configure environment variables:
+   ```bash
+   cp .env.example .env.local
+   ```
+   Ensure `BACKEND_URL=http://127.0.0.1:8000` points to your running FastAPI backend.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+3. Start the development server:
+   ```bash
+   pnpm dev
+   ```
+   Open [http://localhost:3000](http://localhost:3000).
 
-## Learn More
+## Scripts
 
-To learn more about Next.js, take a look at the following resources:
+| Command | Description |
+| :--- | :--- |
+| `pnpm dev` | Start Next.js development server on port 3000 |
+| `pnpm build` | Create an optimized production build |
+| `pnpm start` | Run the compiled production server |
+| `pnpm typecheck` | Generate Next.js route types and run `tsc --noEmit` |
+| `pnpm lint` | Run ESLint checks |
+| `pnpm test` | Run Vitest unit tests (`parse-itinerary`, `trip-machine`) |
+| `pnpm test:e2e` | Run Playwright E2E and `@axe-core/playwright` accessibility tests |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Deploying to Vercel
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. Set the Vercel project **Root Directory** to `frontend`.
+2. Add the environment variable `BACKEND_URL` pointing to your deployed FastAPI backend URL (e.g., `https://your-backend.onrender.com`).
+3. Deploy — [`vercel.json`](./vercel.json) and [`next.config.ts`](./next.config.ts) automatically configure the build, SSE streaming timeout (`maxDuration: 60`), security headers, and static asset caching.

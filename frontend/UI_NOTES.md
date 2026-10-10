@@ -12,19 +12,20 @@ All visual tokens are defined as CSS custom properties in `app/globals.css` for 
 
 | Token | Light | Dark | Role |
 | :--- | :--- | :--- | :--- |
-| `--bg` | `#fafaf9` | `#0a0a0a` | Page background |
-| `--surface` | `#ffffff` | `#141414` | Card / elevated surface |
-| `--surface-2` | `#f5f5f4` | `#1f1f1f` | Muted surface / chips / tabs |
-| `--border` | `#e7e5e4` | `#262626` | Hairline border |
-| `--border-strong` | `#d6d3d1` | `#404040` | Emphasized border |
-| `--text` | `#1c1917` | `#fafafa` | Primary ink |
-| `--text-2` | `#44403c` | `#d4d4d4` | Secondary body ink |
-| `--muted` | `#78716c` | `#a3a3a3` | Labels, metadata, timestamps |
-| `--primary-bg` / `--primary-fg` | `#1c1917` / `#ffffff` | `#fafafa` / `#0a0a0a` | Primary CTA contrast |
+| `--bg` | `#fafaf9` | `#0b120e` | Page background |
+| `--surface` | `#ffffff` | `#111a15` | Card / elevated surface |
+| `--surface-2` | `#f5f5f4` | `#18231d` | Muted surface / chips / tabs |
+| `--border` | `#e7e5e4` | `#22302a` | Hairline border |
+| `--border-strong` | `#d6d3d1` | `#34443b` | Emphasized border |
+| `--text` | `#1c1917` | `#f4f7f5` | Primary ink |
+| `--text-2` | `#44403c` | `#d2dad5` | Secondary body ink |
+| `--muted` | `#78716c` | `#9aa8a0` | Labels, metadata, timestamps |
+| `--primary-bg` / `--primary-fg` | `#1c1917` / `#ffffff` | `#f4f7f5` / `#0b120e` | Primary CTA contrast |
 | `--live` / `--live-soft` | `#16a34a` | `#4ade80` | Live streaming & approved status |
 | `--warn-bg` / `--warn-border` / `--warn-fg` | `#fffbeb` / `#fde68a` / `#92400e` | `#2a2110` / `#5c4513` / `#fcd34d` | HITL review / guardrail attention |
 | `--danger-bg` / `--danger-fg` | `#fef2f2` / `#b91c1c` | `#2a1212` / `#fca5a5` | Error state |
-| `--trace-bg` / `--trace-fg` | `#1c1917` / `#d6d3d1` | `#0f0f0f` / `#d4d4d4` | Live trace terminal panel |
+| `--trace-bg` / `--trace-fg` | `#1c1917` / `#d6d3d1` | `#09100c` / `#d2dad5` | Live trace terminal panel |
+| `--glow` | `rgba(22, 163, 74, 0.1)` | `#16301f` | Top radial hero glow |
 
 ### Typography (`app/fonts.ts`)
 Self-hosted via `next/font/google`:

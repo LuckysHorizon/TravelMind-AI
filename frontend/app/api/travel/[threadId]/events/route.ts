@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export async function GET(
   request: NextRequest,
@@ -9,7 +10,10 @@ export async function GET(
 ) {
   const { threadId } = await context.params;
   const backendUrl = (
-    process.env.BACKEND_URL || "http://127.0.0.1:8000"
+    process.env.BACKEND_URL ||
+    process.env.NEXT_PUBLIC_BACKEND_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "http://127.0.0.1:8000"
   ).replace(/\/$/, "");
 
   const upstreamUrl = `${backendUrl}/api/travel/${encodeURIComponent(threadId)}/events`;
